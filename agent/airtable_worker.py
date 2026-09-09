@@ -1,6 +1,7 @@
 import os
 
 from browser_use import Agent as BrowserUseAgent
+from browser_use import ChatOllama as BrowserUseChatOllama
 
 from agent.airtable_tools import build_airtable_tools
 from agent import local_worker
@@ -20,10 +21,26 @@ AIRTABLE CRM RULES:
 """
 
 
+def tuned_chat_ollama(*args, **kwargs):
+    """Use a CPU-friendly Qwen configuration on GitHub-hosted runners."""
+    kwargs.setdefault(
+        "ollama_options",
+        {
+            "think": False,
+            "num_ctx": 8192,
+            "temperature": 0,
+        },
+    )
+    kwargs["timeout"] = max(float(kwargs.get("timeout") or 0), 150.0)
+    return BrowserUseChatOllama(*args, **kwargs)
+
+
 class AirtableEnabledAgent(BrowserUseAgent):
-    """Browser Use Agent that receives LOCENIX Airtable CRM tools when configured."""
+    """Browser Use Agent with LOCENIX Airtable CRM tools and runner-safe timeouts."""
 
     def __init__(self, *args, **kwargs):
+        kwargs.setdefault("llm_timeout", 120)
+        kwargs.setdefault("step_timeout", 160)
         if os.getenv("AIRTABLE_PAT", "").strip():
             if kwargs.get("tools") is None:
                 kwargs["tools"] = build_airtable_tools()
@@ -34,6 +51,7 @@ class AirtableEnabledAgent(BrowserUseAgent):
 
 # Rebind local_worker behavior before its process loop runs.
 local_worker.Agent = AirtableEnabledAgent
+local_worker.ChatOllama = tuned_chat_ollama
 local_worker.pack_profile = profile_patch.pack_profile
 local_worker.unpack_profile = profile_patch.unpack_profile
 
