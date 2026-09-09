@@ -1,0 +1,2 @@
+LOCENIX cloud agent wake file.
+Updating this file triggers the GitHub Actions runner.
