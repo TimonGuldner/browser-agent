@@ -23,6 +23,8 @@ jobs:
     env:
       SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
       OLLAMA_MODEL: qwen3:4b
@@ -40,6 +42,9 @@ jobs:
             echo "LOCENIX agent is waiting for SUPABASE_SERVICE_ROLE_KEY."
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -z "$AIRTABLE_PAT" ]]; then
+            echo "Airtable is not connected yet. Browser/login jobs can still run; CRM tools will stay disabled."
           fi
 
       - name: Checkout
@@ -90,5 +95,5 @@ jobs:
         shell: bash
         run: |
           for n in 1 2 3; do
-            python -m agent.local_worker --once || true
+            python -m agent.airtable_worker --once || true
           done
