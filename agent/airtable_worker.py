@@ -4,6 +4,7 @@ from browser_use import Agent as BrowserUseAgent
 
 from agent.airtable_tools import build_airtable_tools
 from agent import local_worker
+from agent import profile_patch
 
 AIRTABLE_RULES = """
 
@@ -31,8 +32,10 @@ class AirtableEnabledAgent(BrowserUseAgent):
         super().__init__(*args, **kwargs)
 
 
-# local_worker imports Agent at module import time. Rebind it before its process loop runs.
+# Rebind local_worker behavior before its process loop runs.
 local_worker.Agent = AirtableEnabledAgent
+local_worker.pack_profile = profile_patch.pack_profile
+local_worker.unpack_profile = profile_patch.unpack_profile
 
 
 def main() -> None:
