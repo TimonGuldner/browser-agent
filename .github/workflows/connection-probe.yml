@@ -1,0 +1,39 @@
+name: LOCENIX Connection Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - agent/connection_probe.py
+      - .github/workflows/connection-probe.yml
+      - probe-wake.txt
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
+      PROFILE_BUCKET: locenix-agent-private
+      PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          python -m playwright install --with-deps chromium
+      - name: Probe Airtable and saved LinkedIn session
+        run: python -m agent.connection_probe
