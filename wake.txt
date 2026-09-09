@@ -1,3 +1,3 @@
 LOCENIX free browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
-Fixed Airtable worker queue claim; retest qwen3:1.7b: 2026-09-09T23:31Z.
+Supabase scheduler integration test: 2026-09-10T01:49 Europe/Berlin.
