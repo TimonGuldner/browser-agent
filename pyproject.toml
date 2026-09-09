@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "timon-browser-agent"
-version = "0.3.0"
+version = "0.3.1"
 description = "GitHub Actions browser agent with local Chromium, Supabase control plane and persistent encrypted profile"
 requires-python = ">=3.12,<4.0"
 dependencies = [
@@ -12,6 +16,9 @@ dependencies = [
   "cryptography>=43,<47",
   "ollama>=0.5,<1.0",
 ]
+
+[tool.setuptools]
+packages = ["agent"]
 
 [tool.ruff]
 line-length = 120
