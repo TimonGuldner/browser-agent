@@ -1,4 +1,4 @@
-name: LOCENIX Cloud Agent
+name: LOCENIX Free Browser Agent
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: locenix-cloud-agent
+  group: locenix-free-browser-agent
   cancel-in-progress: false
 
 jobs:
@@ -23,21 +23,21 @@ jobs:
     env:
       SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      BROWSER_USE_API_KEY: ${{ secrets.BROWSER_USE_API_KEY }}
-      BROWSER_USE_MODEL: gpt-5.6-luna
-      BROWSER_USE_PROXY_COUNTRY: de
-      BROWSER_USE_MAX_COST_USD: "1.00"
+      PROFILE_BUCKET: locenix-agent-private
+      PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
+      OLLAMA_MODEL: qwen3:4b
+      OLLAMA_HOST: http://127.0.0.1:11434
+      LOGIN_TIMEOUT_SECONDS: "900"
       MAX_RUNTIME_SECONDS: "1200"
-      POLL_SECONDS: "4"
 
     steps:
       - name: Check configuration
         id: config
         shell: bash
         run: |
-          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" || -z "$BROWSER_USE_API_KEY" ]]; then
+          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "LOCENIX agent is waiting for repository secrets."
+            echo "LOCENIX agent is waiting for SUPABASE_SERVICE_ROLE_KEY."
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -53,16 +53,42 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install agent
+      - name: Install Python dependencies
         if: steps.config.outputs.ready == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e .
 
+      - name: Install Chromium and remote-login tools
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb x11vnc novnc websockify
+          curl -fsSL --retry 3 \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cloudflared
+          chmod +x /tmp/cloudflared
+          sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+
+      - name: Cache local AI model
+        if: steps.config.outputs.ready == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ollama-qwen3-4b-v1
+
+      - name: Install Ollama
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+
       - name: Process queued jobs
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
-          for n in 1 2 3 4 5; do
-            python -m agent.cloud_worker --once
+          for n in 1 2 3; do
+            python -m agent.local_worker --once || true
           done
