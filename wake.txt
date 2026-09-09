@@ -1,3 +1,3 @@
 LOCENIX free browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
-Read-only Airtable + LinkedIn smoke test: 2026-09-09T23:13Z.
+Retest with qwen3:1.7b, thinking disabled: 2026-09-09T23:25Z.
