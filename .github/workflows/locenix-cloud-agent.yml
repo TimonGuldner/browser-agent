@@ -19,7 +19,7 @@ concurrency:
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -45,28 +45,55 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
           if [[ -z "$AIRTABLE_PAT" ]]; then
-            echo "Airtable is not connected yet. Browser/login jobs can still run; CRM tools will stay disabled."
+            echo "Airtable is not connected yet. Scheduled CRM jobs will fail closed."
+          fi
+
+      - name: Enqueue due Supabase schedules
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
+          echo "Supabase scheduler checked successfully."
+
+      - name: Check queued work
+        if: steps.config.outputs.ready == 'true'
+        id: queue
+        shell: bash
+        run: |
+          RESPONSE=$(curl --fail --silent --show-error \
+            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id&limit=1" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
+          if [[ "$RESPONSE" == "[]" ]]; then
+            echo "has_work=false" >> "$GITHUB_OUTPUT"
+            echo "No queued LOCENIX work. Heavy browser setup skipped."
+          else
+            echo "has_work=true" >> "$GITHUB_OUTPUT"
+            echo "Queued LOCENIX work found. Starting browser worker."
           fi
 
       - name: Checkout
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install Python dependencies
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e .
 
       - name: Install Chromium and remote-login tools
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
           python -m playwright install --with-deps chromium
@@ -79,22 +106,20 @@ jobs:
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
 
       - name: Cache local AI model
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.ollama
           key: ollama-qwen3-1.7b-v1
 
       - name: Install Ollama
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
 
-      - name: Process queued jobs
-        if: steps.config.outputs.ready == 'true'
+      - name: Process next queued job
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
-          for n in 1 2 3; do
-            python -m agent.airtable_worker --once || true
-          done
+          python -m agent.airtable_worker --once
