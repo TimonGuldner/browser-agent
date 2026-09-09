@@ -28,7 +28,7 @@ jobs:
       AGENT_WORKER_ID: github-actions-airtable-v2
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
-      OLLAMA_MODEL: qwen3:1.7b
+      OLLAMA_MODEL: qwen3:4b
       OLLAMA_HOST: http://127.0.0.1:11434
       LOGIN_TIMEOUT_SECONDS: "900"
       MAX_RUNTIME_SECONDS: "1200"
@@ -110,7 +110,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ollama
-          key: ollama-qwen3-1.7b-v1
+          key: ollama-qwen3-4b-v1
 
       - name: Install Ollama
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
