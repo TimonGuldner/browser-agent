@@ -1,0 +1,35 @@
+name: Airtable Connection Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/airtable-probe.yml
+      - airtable-probe-wake.txt
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+    steps:
+      - name: Verify Airtable secret and base access
+        shell: bash
+        run: |
+          if [[ -z "$AIRTABLE_PAT" ]]; then
+            echo "AIRTABLE_PAT is missing"
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $AIRTABLE_PAT" \
+            "https://api.airtable.com/v0/appN6ox7fjGFyXZhL/tbloK0jz2X6ffr0D2?maxRecords=1")
+          if [[ "$code" != "200" ]]; then
+            echo "Airtable probe failed with HTTP $code"
+            exit 1
+          fi
+          echo "Airtable connection OK"
