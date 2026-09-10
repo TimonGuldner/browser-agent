@@ -247,7 +247,7 @@ async def _probe_sales_navigator_inbox(page) -> dict[str, Any]:
 
     result = await _read_nav_badge(
         page,
-        link_selector='a[href*="/sales/inbox"], a[href*="/sales/messaging"]',
+        link_selector='a, button, [role="link"], [role="button"]',
         root_pattern=r"/sales/(?:inbox|messaging)/?(?:\?.*)?$",
         labels=("messaging", "nachrichten", "inbox", "posteingang"),
     )
