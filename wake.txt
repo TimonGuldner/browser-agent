@@ -1,3 +1,5 @@
 LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
-Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries. Lead recovery target: minimum 10 new Sales Navigator profiles.
+Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries.
+Cost Architecture V2 enabled: Lead research and outreach are split; lead target is 10; outbound phase uses existing qualified CRM leads only.
+Wake: run cost-optimized outreach v2.
