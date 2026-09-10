@@ -1,4 +1,4 @@
-name: LOCENIX Free Browser Agent
+name: LOCENIX Cost-Optimized Browser Agent
 
 on:
   workflow_dispatch:
@@ -13,21 +13,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: locenix-free-browser-agent
+  group: locenix-browser-agent
   cancel-in-progress: false
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      GOOGLE_MODEL: gemini-3.7-flash
-      AGENT_WORKER_ID: github-actions-airtable-v3-gemini
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: gpt-5.6-luna
+      MONTHLY_LLM_BUDGET_USD: "10"
+      INBOX_FORCE_LLM_HOURS: "4"
+      AGENT_WORKER_ID: github-actions-airtable-v4-luna
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
       LOGIN_TIMEOUT_SECONDS: "900"
@@ -45,10 +47,10 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
           if [[ -z "$AIRTABLE_PAT" ]]; then
-            echo "Airtable is not connected yet. Scheduled CRM jobs will fail closed."
+            echo "Airtable is not connected. Scheduled CRM jobs fail closed."
           fi
-          if [[ -z "$GOOGLE_API_KEY" ]]; then
-            echo "Gemini is not connected yet. Login jobs still work, but AI jobs will fail closed."
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "OpenAI API is not connected yet. Zero-LLM gates/login can still work; AI jobs fail closed."
           fi
 
       - name: Enqueue due Supabase schedules
@@ -68,14 +70,21 @@ jobs:
         shell: bash
         run: |
           RESPONSE=$(curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id&limit=1" \
+            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode&order=priority.asc,created_at.asc&limit=1" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
           if [[ "$RESPONSE" == "[]" ]]; then
             echo "has_work=false" >> "$GITHUB_OUTPUT"
+            echo "needs_login=false" >> "$GITHUB_OUTPUT"
             echo "No queued LOCENIX work. Heavy browser setup skipped."
           else
+            MODE=$(echo "$RESPONSE" | jq -r '.[0].mode // ""')
             echo "has_work=true" >> "$GITHUB_OUTPUT"
-            echo "Queued LOCENIX work found. Starting browser worker."
+            if [[ "$MODE" == "login" ]]; then
+              echo "needs_login=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "needs_login=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "Queued LOCENIX work found."
           fi
 
       - name: Checkout
@@ -95,11 +104,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Install Chromium and remote-login tools
+      - name: Install Chromium
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
           python -m playwright install --with-deps chromium
+
+      - name: Install remote login tools only when needed
+        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true' && steps.queue.outputs.needs_login == 'true'
+        shell: bash
+        run: |
           sudo apt-get update -qq
           sudo apt-get install -y xvfb x11vnc novnc websockify
           curl -fsSL --retry 3 \
@@ -108,8 +122,10 @@ jobs:
           chmod +x /tmp/cloudflared
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
 
-      - name: Process next queued job
+      - name: Process up to two queued jobs
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
-          python -m agent.airtable_worker --once
+          for n in 1 2; do
+            python -m agent.airtable_worker --once
+          done
