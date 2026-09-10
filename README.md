@@ -1,105 +1,69 @@
-# LOCENIX Cloud Browser Agent
+# LOCENIX LinkedIn Browser Agent
 
-Cloud-only browser automation for LOCENIX. No local PC, VPS, or always-on server is required.
+Cloud automation for LOCENIX without a PC, VPS, or Browser Use Cloud credits.
 
 ## Architecture
 
-`ChatGPT -> Supabase agent_jobs -> GitHub Actions -> Browser Use Cloud -> LinkedIn -> result/live URL -> Supabase -> ChatGPT`
+`Supabase schedules/jobs -> GitHub Actions -> local Chromium + Browser Use open source -> LinkedIn`
 
-- **Supabase automation-hub** is the control plane and memory.
-- **GitHub Actions** is the disposable runner. It wakes on `wake.txt`, manually, and every 15 minutes.
-- **Browser Use Cloud** hosts the actual browser and persistent login profile.
-- **ChatGPT** can queue jobs, wake the runner, read status/results, and return a Browser Use live URL when human login is required.
+`Airtable LOCENIX LinkedIn Growth OS <-> agent tools`
 
-## Supported job modes
+`Google Gemini Flash -> Browser Use reasoning`
 
-- `view` — read-only browser work. No external changes.
-- `act` — perform the explicitly requested action.
-- `autonomous` — complete a bounded browser task autonomously.
-- `login` — open a persistent LinkedIn login browser and return a live URL for manual sign-in.
-- `stop_session` — stop the login browser so the profile/cookies are persisted for later runs.
+- **Supabase automation-hub** stores the four role prompts, schedules, queue, job state and browser-session metadata.
+- **GitHub Actions** wakes every 15 minutes (and on `wake.txt`) and only starts the heavier browser setup if queued work exists.
+- **Chromium** runs directly on the GitHub-hosted runner, so Browser Use Cloud credits are not required.
+- **LinkedIn login state** is persisted as an encrypted lean browser-profile snapshot in the private Supabase storage bucket.
+- **Airtable** remains the operational source of truth for people, interactions, content, daily queue and growth intelligence.
+- **Gemini Flash** supplies the agent reasoning via Browser Use `ChatGoogle`; the former tiny local Qwen/Ollama model is not used for production agent decisions.
 
-Security checkpoints, CAPTCHA, and 2FA are left for human interaction instead of being bypassed.
+## Required GitHub Actions secrets
 
-## One-time GitHub configuration
+1. `SUPABASE_SERVICE_ROLE_KEY`
+2. `AIRTABLE_PAT`
+3. `GOOGLE_API_KEY`
 
-The workflow intentionally refuses to run until these repository Actions secrets exist:
+Never commit or paste these values into the repository, logs, prompts, issues, or chat.
 
-1. `SUPABASE_SERVICE_ROLE_KEY` — service-role key for the existing `automation-hub` Supabase project.
-2. `BROWSER_USE_API_KEY` — Browser Use Cloud API key.
+## Four Supabase-controlled roles
 
-Do not commit either value to the repository, `.env`, issues, logs, or chat prompts.
+The durable schedules are stored in Supabase and are intentionally independent from the GitHub cron. The GitHub cron is only a wake/check mechanism.
 
-The public Supabase project URL is already configured in `.github/workflows/locenix-cloud-agent.yml`.
+- `inbox`: hourly at minute 00, Europe/Berlin
+- `growth`: Monday-Friday at 09:30 and 17:30, Europe/Berlin
+- `lead`: Monday-Friday at 10:00, Europe/Berlin
+- `content`: Monday-Friday at 11:00, Europe/Berlin
 
-## LinkedIn login flow
+The four schedules can remain disabled while a new inference configuration is being QA-tested. The scheduler function is idempotent by role/time slot, so repeated 15-minute checks do not intentionally create duplicate scheduled jobs.
 
-1. Queue an `agent_jobs` row with `mode = 'login'`.
-2. Wake the GitHub Action by updating `wake.txt`.
-3. The worker creates or reuses the Browser Use profile `locenix-linkedin`.
-4. The Browser Use live URL is written to `agent_jobs.result.live_url` and `agent_browser_sessions.live_url`.
-5. Open that live URL and sign in to LinkedIn yourself, including any 2FA/security check.
-6. Queue a `stop_session` job and wake the runner.
-7. Browser Use stops the session and persists the profile state.
+## Safety behavior
 
-After that, normal LOCENIX jobs reuse the same profile automatically.
+- Airtable is checked before contact/research to prevent duplicates and respect `Do Not Contact`.
+- Only technically confirmed external actions may be recorded as sent/published/executed.
+- CAPTCHA, 2FA, security checkpoints, rate limits and platform warnings are never bypassed.
+- Content visuals retain the explicit approval gate defined in the Content Agent prompt.
+- If a required capability is unavailable, the runtime must report a blocker instead of fabricating success.
 
-## Queue examples
+## Login flow
 
-Read-only:
+A `login` job opens a temporary noVNC view backed by Chromium on the GitHub runner. The human completes LinkedIn authentication. After confirmation, the worker verifies the feed and stores a minimized encrypted browser profile in Supabase. Later jobs restore that profile on fresh GitHub runners.
 
-```sql
-insert into public.agent_jobs (task, mode)
-values ('Open LinkedIn and summarize the newest inbox conversations.', 'view');
-```
-
-Bounded action:
-
-```sql
-insert into public.agent_jobs (task, mode)
-values ('Open the specified LinkedIn conversation and draft the next natural reply. Do not send it.', 'act');
-```
-
-Login:
-
-```sql
-insert into public.agent_jobs (task, mode)
-values ('Prepare LinkedIn login.', 'login');
-```
-
-Stop the active login browser:
-
-```sql
-insert into public.agent_jobs (task, mode)
-values ('Persist LinkedIn login and close the browser.', 'stop_session');
-```
-
-## Cloud worker
-
-The main runtime is:
+## Main runtime
 
 ```bash
-python -m agent.cloud_worker --once
+python -m agent.airtable_worker --once
 ```
 
-The worker:
+The Airtable-enabled worker reuses the proven Supabase queue/profile/browser lifecycle in `agent.local_worker`, injects the LOCENIX Airtable tools, and swaps the inference layer to Google Gemini Flash.
 
-1. atomically claims one queued job using `claim_agent_job()`;
-2. creates/reuses the persistent Browser Use profile;
-3. starts the cloud browser/agent session;
-4. saves the live URL and progress in Supabase;
-5. polls the cloud session;
-6. writes the final result, status, cost, and errors back to Supabase.
+## Relevant files
 
-The GitHub workflow processes up to five queued jobs per invocation.
+- `agent/airtable_worker.py` — production worker adapter, Airtable tools + Gemini LLM
+- `agent/local_worker.py` — GitHub Chromium, encrypted profile, queue lifecycle
+- `agent/airtable_tools.py` / `agent/extended_airtable_tools.py` — LOCENIX Airtable actions
+- `.github/workflows/locenix-cloud-agent.yml` — 15-minute scheduler wake + job runner
+- `wake.txt` — immediate manual/chat-triggered wake
 
-## Cost controls
+## Cost model
 
-The default Browser Use per-task cap is `1.00 USD` and can be overridden per job in `agent_jobs.input.max_cost_usd`. Login preparation uses a lower default cap.
-
-## Files
-
-- `agent/cloud_worker.py` — cloud runner and login/session lifecycle
-- `.github/workflows/locenix-cloud-agent.yml` — GitHub Actions runtime
-- `wake.txt` — immediate ChatGPT/GitHub wake trigger
-- `agent/worker.py` / `agent/browser_runner.py` — legacy self-hosted baseline, no longer used by the cloud workflow
+The standard GitHub-hosted runner is free for this public repository. Google currently offers a Gemini Developer API free tier for supported models. Free-tier limits still apply and can change. The free tier may use submitted content to improve Google products; use a paid/provider configuration instead if that data-use policy is not acceptable for the workload.
