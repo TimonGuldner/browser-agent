@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "timon-browser-agent"
-version = "0.3.2"
-description = "GitHub Actions browser agent with local Chromium, Supabase control plane and persistent encrypted profile"
+version = "0.4.0"
+description = "Cost-optimized GitHub Actions LinkedIn agent with local Chromium, Supabase control plane, Airtable CRM and GPT-5.6 Luna"
 requires-python = ">=3.12,<4.0"
 dependencies = [
   "browser-use==0.13.10",
@@ -15,7 +15,7 @@ dependencies = [
   "python-dotenv>=1.0,<2.0",
   "pydantic-settings>=2.0,<3.0",
   "cryptography>=43,<47",
-  "ollama>=0.5,<1.0",
+  "openai>=2.0,<3.0",
 ]
 
 [tool.setuptools]
