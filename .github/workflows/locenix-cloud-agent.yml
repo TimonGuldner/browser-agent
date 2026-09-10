@@ -7,7 +7,7 @@ on:
     paths:
       - wake.txt
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: read
@@ -122,10 +122,10 @@ jobs:
           chmod +x /tmp/cloudflared
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
 
-      - name: Process up to two queued jobs
+      - name: Process up to six queued jobs
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
         run: |
-          for n in 1 2; do
+          for n in 1 2 3 4 5 6; do
             python -m agent.airtable_worker --once
           done
