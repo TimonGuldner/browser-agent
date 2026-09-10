@@ -169,7 +169,9 @@ def build_airtable_tools() -> Tools:
         day = date or _today_berlin()
         client = AirtableClient()
         try:
-            formula = f"AND({{Date}}='{day}',NOT({{Executed}}))"
+            # Airtable date cells are typed values; direct string equality can return an empty result.
+            # Normalize the cell to ISO date text before comparison so today's queue is reliably found.
+            formula = f"AND(DATETIME_FORMAT({{Date}},'YYYY-MM-DD')='{day}',NOT({{Executed}}))"
             rows = client.list_records(TABLES["queue"], max_records=100, params={"filterByFormula": formula})
             wanted = ["Task", "Date", "Action Type", "Priority", "Suggested Action", "Draft", "Status", "Needs Approval", "Executed", "Result", "Person"]
             result = [_compact(row, wanted) for row in rows]
