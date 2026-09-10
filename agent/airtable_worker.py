@@ -13,57 +13,69 @@ from agent import profile_patch
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna").strip()
 MONTHLY_LLM_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
 
-# The large saving comes from skipping unnecessary AI calls. Once AI is needed,
-# every customer-facing/strategic role keeps planning, medium reasoning and judging.
 ROLE_POLICIES: dict[str, dict[str, Any]] = {
     "inbox": {
         "max_steps": 30,
-        "max_history_items": 16,
-        "run_budget_usd": 0.25,
+        "max_history_items": 12,
+        "run_budget_usd": 0.12,
+        "reasoning_effort": "medium",
+        "flash_mode": False,
+        "use_thinking": True,
+        "max_completion_tokens": 2600,
+        "max_clickable_elements_length": 16000,
+        "use_judge": True,
+        "enable_planning": True,
+    },
+    "growth": {
+        "max_steps": 28,
+        "max_history_items": 8,
+        "run_budget_usd": 0.15,
+        "reasoning_effort": "medium",
+        "flash_mode": False,
+        "use_thinking": True,
+        "max_completion_tokens": 3000,
+        "max_clickable_elements_length": 14000,
+        "use_judge": False,
+        "enable_planning": False,
+    },
+    "lead": {
+        "max_steps": 30,
+        "max_history_items": 6,
+        "run_budget_usd": 0.12,
+        "reasoning_effort": "medium",
+        "flash_mode": False,
+        "use_thinking": True,
+        "max_completion_tokens": 2600,
+        "max_clickable_elements_length": 12000,
+        "use_judge": False,
+        "enable_planning": False,
+    },
+    "content": {
+        "max_steps": 24,
+        "max_history_items": 8,
+        "run_budget_usd": 0.12,
         "reasoning_effort": "medium",
         "flash_mode": False,
         "use_thinking": True,
         "max_completion_tokens": 3200,
-    },
-    "growth": {
-        "max_steps": 40,
-        "max_history_items": 20,
-        "run_budget_usd": 0.75,
-        "reasoning_effort": "medium",
-        "flash_mode": False,
-        "use_thinking": True,
-        "max_completion_tokens": 4096,
-    },
-    "lead": {
-        "max_steps": 40,
-        "max_history_items": 20,
-        "run_budget_usd": 0.75,
-        "reasoning_effort": "medium",
-        "flash_mode": False,
-        "use_thinking": True,
-        "max_completion_tokens": 4096,
-    },
-    "content": {
-        "max_steps": 40,
-        "max_history_items": 20,
-        "run_budget_usd": 0.75,
-        "reasoning_effort": "medium",
-        "flash_mode": False,
-        "use_thinking": True,
-        "max_completion_tokens": 5000,
+        "max_clickable_elements_length": 12000,
+        "use_judge": False,
+        "enable_planning": False,
     },
 }
 DEFAULT_POLICY = {
-    "max_steps": 30,
-    "max_history_items": 16,
-    "run_budget_usd": 0.50,
+    "max_steps": 24,
+    "max_history_items": 8,
+    "run_budget_usd": 0.12,
     "reasoning_effort": "medium",
     "flash_mode": False,
     "use_thinking": True,
-    "max_completion_tokens": 3200,
+    "max_completion_tokens": 2600,
+    "max_clickable_elements_length": 12000,
+    "use_judge": False,
+    "enable_planning": False,
 }
 
-# Official GPT-5.6 Luna token prices. These are used only for a local safety estimate.
 INPUT_USD_PER_M = 0.20
 CACHED_INPUT_USD_PER_M = 0.02
 OUTPUT_USD_PER_M = 1.20
@@ -93,6 +105,9 @@ COST-EFFICIENT EXECUTION RULES:
 - Keep final reports concise; do not narrate routine browser steps.
 - Stop immediately when the run has no meaningful next action.
 - Never manufacture activity merely to fill a quota.
+- For Lead, research/CRM work comes before outreach. The minimum target is 10 new profiles, not 20.
+- Do not repeatedly reopen the same Sales Navigator result or re-read the same Airtable context in one run.
+- Keep only the minimum browser state needed for the current person. Do not carry large prior DOM snapshots forward.
 """
 
 
@@ -136,7 +151,6 @@ class MeteredChatOpenAI(BrowserUseChatOpenAI):
 
 
 def openai_llm(*args, **kwargs):
-    """Use GPT-5.6 Luna while keeping the proven local Chromium worker."""
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise RuntimeError(
@@ -157,7 +171,7 @@ def openai_llm(*args, **kwargs):
 
 
 class AirtableEnabledAgent(BrowserUseAgent):
-    """Browser Use Agent with full LOCENIX CRM context and role-aware quality settings."""
+    """Browser Use Agent with LOCENIX CRM context and role-aware token limits."""
 
     def __init__(self, *args, **kwargs):
         policy = _policy_for_current_role()
@@ -167,9 +181,9 @@ class AirtableEnabledAgent(BrowserUseAgent):
         kwargs.setdefault("use_thinking", bool(policy["use_thinking"]))
         kwargs.setdefault("max_history_items", int(policy["max_history_items"]))
         kwargs.setdefault("message_compaction", True)
-        kwargs.setdefault("max_clickable_elements_length", 28000)
-        kwargs.setdefault("use_judge", True)
-        kwargs.setdefault("enable_planning", not bool(policy["flash_mode"]))
+        kwargs.setdefault("max_clickable_elements_length", int(policy["max_clickable_elements_length"]))
+        kwargs.setdefault("use_judge", bool(policy["use_judge"]))
+        kwargs.setdefault("enable_planning", bool(policy["enable_planning"]))
         if os.getenv("AIRTABLE_PAT", "").strip():
             if kwargs.get("tools") is None:
                 tools = build_airtable_tools()
@@ -201,7 +215,10 @@ def _persist_usage(db, job_id: str, role: str) -> None:
             "prompt_cache_friendly": True,
             "flash_mode": bool(policy["flash_mode"]),
             "reasoning_effort": policy["reasoning_effort"],
-            "quality_planning_preserved": not bool(policy["flash_mode"]),
+            "quality_planning_preserved": bool(policy["enable_planning"]),
+            "max_history_items": int(policy["max_history_items"]),
+            "max_clickable_elements_length": int(policy["max_clickable_elements_length"]),
+            "use_judge": bool(policy["use_judge"]),
         }
         local_worker.update_job(db, job_id, result=result)
     except Exception:
@@ -212,14 +229,12 @@ _original_run_agent_job = local_worker.run_agent_job
 
 
 async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
-    """Skip empty inbox runs, enforce budgets, then delegate real work to Browser Use + Luna."""
     job_id = str(job["id"])
     input_data = job.get("input") or {}
     role = str(input_data.get("agent_role") or "").strip().lower()
     scheduled = bool(input_data.get("scheduled"))
     policy = ROLE_POLICIES.get(role, DEFAULT_POLICY)
 
-    # Deterministic QA hook: inspects only the top-level Messaging nav, never a conversation and never the LLM.
     if bool(input_data.get("cost_gate_probe_only")):
         probe = await probe_linkedin_message_badge(db)
         local_worker.update_job(
@@ -293,8 +308,6 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
                 pass
 
 
-# Rebind local_worker behavior before its process loop runs. The legacy names stay
-# internal so we do not disturb the already-tested profile/login/queue lifecycle.
 local_worker.Agent = AirtableEnabledAgent
 local_worker.ChatOllama = openai_llm
 local_worker.ensure_ollama = lambda: None
