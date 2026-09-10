@@ -1,12 +1,14 @@
 import os
 
 from browser_use import Agent as BrowserUseAgent
-from browser_use import ChatOllama as BrowserUseChatOllama
+from browser_use import ChatGoogle as BrowserUseChatGoogle
 
 from agent.airtable_tools import build_airtable_tools
 from agent.extended_airtable_tools import add_extended_airtable_tools
 from agent import local_worker
 from agent import profile_patch
+
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-3.7-flash").strip()
 
 AIRTABLE_RULES = """
 
@@ -25,26 +27,27 @@ AIRTABLE CRM RULES:
 """
 
 
-def tuned_chat_ollama(*args, **kwargs):
-    """Use a deterministic CPU-friendly Qwen configuration on GitHub-hosted runners."""
-    kwargs.setdefault(
-        "ollama_options",
-        {
-            "think": False,
-            "num_ctx": 8192,
-            "temperature": 0,
-        },
+def gemini_llm(*args, **kwargs):
+    """Use Google's hosted Flash model instead of a tiny CPU-bound local model."""
+    api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not configured. Add it as a GitHub Actions repository secret before enabling scheduled jobs."
+        )
+    return BrowserUseChatGoogle(
+        model=GOOGLE_MODEL,
+        api_key=api_key,
+        temperature=0,
     )
-    kwargs["timeout"] = max(float(kwargs.get("timeout") or 0), 240.0)
-    return BrowserUseChatOllama(*args, **kwargs)
 
 
 class AirtableEnabledAgent(BrowserUseAgent):
     """Browser Use Agent with the complete LOCENIX Airtable handoff surface."""
 
     def __init__(self, *args, **kwargs):
-        kwargs.setdefault("llm_timeout", 240)
-        kwargs.setdefault("step_timeout", 300)
+        kwargs.setdefault("llm_timeout", 120)
+        kwargs.setdefault("step_timeout", 180)
+        kwargs.setdefault("flash_mode", True)
         if os.getenv("AIRTABLE_PAT", "").strip():
             if kwargs.get("tools") is None:
                 tools = build_airtable_tools()
@@ -54,9 +57,13 @@ class AirtableEnabledAgent(BrowserUseAgent):
         super().__init__(*args, **kwargs)
 
 
-# Rebind local_worker behavior before its process loop runs.
+# Rebind local_worker behavior before its process loop runs. local_worker still
+# references these legacy names internally, so replacing them here lets us keep
+# the proven browser/profile/queue code while swapping only the inference layer.
 local_worker.Agent = AirtableEnabledAgent
-local_worker.ChatOllama = tuned_chat_ollama
+local_worker.ChatOllama = gemini_llm
+local_worker.ensure_ollama = lambda: None
+local_worker.OLLAMA_MODEL = GOOGLE_MODEL
 local_worker.pack_profile = profile_patch.pack_profile
 local_worker.unpack_profile = profile_patch.unpack_profile
 
