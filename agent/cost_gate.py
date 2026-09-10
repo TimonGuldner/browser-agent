@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from playwright.async_api import async_playwright
 from supabase import Client
@@ -11,6 +12,7 @@ from agent import local_worker
 
 STATE_KEY = "locenix_inbox_cost_gate_v1"
 FORCE_LLM_HOURS = max(1, int(os.getenv("INBOX_FORCE_LLM_HOURS", "4")))
+BERLIN = ZoneInfo("Europe/Berlin")
 
 
 def _now() -> datetime:
@@ -60,7 +62,7 @@ def due_followup_count() -> int:
     finally:
         client.close()
 
-    today = datetime.now().date().isoformat()
+    today = datetime.now(BERLIN).date().isoformat()
     closed_statuses = {"NOT_INTERESTED", "DO_NOT_CONTACT", "NO_RESPONSE"}
     count = 0
     for row in rows:
@@ -75,8 +77,13 @@ def due_followup_count() -> int:
     return count
 
 
+def _badge_number(text: str) -> int | None:
+    matches = [int(x) for x in re.findall(r"(?<!\d)(\d{1,3})(?!\d)", text)]
+    return max(matches) if matches else None
+
+
 async def probe_linkedin_message_badge(db: Client) -> dict[str, Any]:
-    """Read the global LinkedIn Messaging nav badge without opening a conversation."""
+    """Read only the global LinkedIn Messaging nav badge without opening a conversation."""
     if not local_worker.restore_profile(db):
         return {"confident": False, "unread_count": None, "blocker": "saved_profile_missing"}
 
@@ -98,34 +105,92 @@ async def probe_linkedin_message_badge(db: Client) -> dict[str, Any]:
 
             links = page.locator('a[href*="/messaging/"]')
             link_count = await links.count()
-            if link_count == 0:
-                return {"confident": False, "unread_count": None, "blocker": "messaging_nav_not_found", "url": url}
-
-            samples: list[str] = []
-            for i in range(min(link_count, 4)):
+            candidates: list[Any] = []
+            for i in range(min(link_count, 20)):
                 link = links.nth(i)
                 try:
-                    payload = await link.evaluate(
-                        """el => {
-                          const box = el.closest('li') || el.parentElement || el;
-                          return [
-                            el.getAttribute('aria-label') || '',
-                            el.innerText || '',
-                            box.getAttribute && (box.getAttribute('aria-label') || ''),
-                            box.innerText || '',
-                            box.className || ''
-                          ].join(' | ');
-                        }"""
+                    info = await link.evaluate(
+                        """el => ({
+                          href: el.getAttribute('href') || '',
+                          aria: el.getAttribute('aria-label') || '',
+                          text: (el.innerText || '').trim(),
+                          cls: el.className || ''
+                        })"""
                     )
-                    samples.append(str(payload))
                 except Exception:
                     continue
+                href = str(info.get("href") or "")
+                aria = str(info.get("aria") or "")
+                text = str(info.get("text") or "")
+                combined = f"{aria} {text}".lower()
+                is_thread = "/messaging/thread/" in href.lower()
+                is_nav_label = any(token in combined for token in ("messaging", "nachrichten"))
+                is_messaging_root = bool(re.search(r"/messaging/?(?:\?.*)?$", href))
+                if not is_thread and (is_nav_label or is_messaging_root):
+                    candidates.append(link)
 
-            combined = " | ".join(samples).lower()
-            numbers = [int(x) for x in re.findall(r"(?<!\d)(\d{1,3})(?!\d)", combined)]
-            explicit_unread = any(token in combined for token in ("unread", "ungelesen", "new message", "neue nachricht"))
-            unread = max(numbers) if numbers else (1 if explicit_unread else 0)
-            return {"confident": True, "unread_count": unread, "blocker": None, "url": url}
+            if not candidates:
+                return {"confident": False, "unread_count": None, "blocker": "messaging_nav_not_found", "url": url}
+
+            nav = candidates[0]
+            data = await nav.evaluate(
+                """el => {
+                  const box = el.closest('li') || el;
+                  const badgeSelectors = [
+                    '.notification-badge__count',
+                    '[class*="notification-badge"]',
+                    '[class*="notification-count"]',
+                    '[class*="badge-count"]',
+                    '[aria-label*="unread" i]',
+                    '[aria-label*="ungeles" i]',
+                    '[aria-label*="new message" i]',
+                    '[aria-label*="neue nachricht" i]'
+                  ];
+                  const badgeNodes = [];
+                  for (const selector of badgeSelectors) {
+                    for (const node of box.querySelectorAll(selector)) {
+                      if (!badgeNodes.includes(node)) badgeNodes.push(node);
+                    }
+                  }
+                  return {
+                    href: el.getAttribute('href') || '',
+                    linkAria: el.getAttribute('aria-label') || '',
+                    linkText: (el.innerText || '').trim(),
+                    badgeTexts: badgeNodes.map(node => [
+                      node.getAttribute('aria-label') || '',
+                      node.textContent || ''
+                    ].join(' ').trim()).filter(Boolean)
+                  };
+                }"""
+            )
+
+            badge_texts = [str(x) for x in (data.get("badgeTexts") or [])]
+            badge_blob = " | ".join(badge_texts).lower()
+            link_blob = f"{data.get('linkAria') or ''} {data.get('linkText') or ''}".lower()
+
+            count = _badge_number(badge_blob)
+            if count is None and badge_blob and any(
+                token in badge_blob for token in ("unread", "ungeles", "new message", "neue nachricht")
+            ):
+                count = 1
+
+            # Some LinkedIn variants put the unread count directly into the nav link aria-label.
+            if count is None and any(
+                token in link_blob for token in ("unread", "ungeles", "new message", "neue nachricht", "notification")
+            ):
+                count = _badge_number(link_blob) or 1
+
+            # A clearly identified Messaging root link with no unread badge means zero.
+            if count is None and not badge_texts:
+                count = 0
+
+            return {
+                "confident": count is not None,
+                "unread_count": count,
+                "blocker": None if count is not None else "messaging_badge_ambiguous",
+                "url": url,
+                "probe_version": 2,
+            }
         finally:
             await context.close()
             try:
@@ -176,6 +241,7 @@ async def evaluate_inbox_gate(db: Client) -> dict[str, Any]:
         "last_due_followup_count": followups,
         "last_decision": decision,
         "last_blocker": probe.get("blocker"),
+        "probe_version": probe.get("probe_version"),
     }
     _set_state(db, next_state)
     return {
@@ -186,6 +252,7 @@ async def evaluate_inbox_gate(db: Client) -> dict[str, Any]:
         "due_followups": followups,
         "probe_confident": bool(probe.get("confident")),
         "blocker": probe.get("blocker"),
+        "probe_version": probe.get("probe_version"),
     }
 
 
