@@ -13,54 +13,54 @@ from agent import profile_patch
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna").strip()
 MONTHLY_LLM_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
 
-# Cost is reduced mostly by skipping unnecessary inference and compacting history.
-# Complex roles retain planning/thinking so output quality is not traded away for cents.
+# The large saving comes from skipping unnecessary AI calls. Once AI is needed,
+# every customer-facing/strategic role keeps planning, medium reasoning and judging.
 ROLE_POLICIES: dict[str, dict[str, Any]] = {
     "inbox": {
-        "max_steps": 24,
-        "max_history_items": 10,
+        "max_steps": 30,
+        "max_history_items": 16,
         "run_budget_usd": 0.25,
-        "reasoning_effort": "low",
-        "flash_mode": True,
-        "use_thinking": False,
-        "max_completion_tokens": 1800,
+        "reasoning_effort": "medium",
+        "flash_mode": False,
+        "use_thinking": True,
+        "max_completion_tokens": 3200,
     },
     "growth": {
         "max_steps": 40,
-        "max_history_items": 14,
+        "max_history_items": 20,
         "run_budget_usd": 0.75,
         "reasoning_effort": "medium",
         "flash_mode": False,
         "use_thinking": True,
-        "max_completion_tokens": 2600,
+        "max_completion_tokens": 4096,
     },
     "lead": {
         "max_steps": 40,
-        "max_history_items": 14,
+        "max_history_items": 20,
         "run_budget_usd": 0.75,
         "reasoning_effort": "medium",
         "flash_mode": False,
         "use_thinking": True,
-        "max_completion_tokens": 2600,
+        "max_completion_tokens": 4096,
     },
     "content": {
         "max_steps": 40,
-        "max_history_items": 14,
+        "max_history_items": 20,
         "run_budget_usd": 0.75,
         "reasoning_effort": "medium",
         "flash_mode": False,
         "use_thinking": True,
-        "max_completion_tokens": 3000,
+        "max_completion_tokens": 5000,
     },
 }
 DEFAULT_POLICY = {
     "max_steps": 30,
-    "max_history_items": 12,
+    "max_history_items": 16,
     "run_budget_usd": 0.50,
-    "reasoning_effort": "low",
-    "flash_mode": True,
-    "use_thinking": False,
-    "max_completion_tokens": 2000,
+    "reasoning_effort": "medium",
+    "flash_mode": False,
+    "use_thinking": True,
+    "max_completion_tokens": 3200,
 }
 
 # Official GPT-5.6 Luna token prices. These are used only for a local safety estimate.
@@ -87,10 +87,10 @@ AIRTABLE CRM RULES:
 - Never set Content Engine status to Published without a technically confirmed LinkedIn URL.
 
 COST-EFFICIENT EXECUTION RULES:
-- Quality and the Master Prompt remain binding. Save tokens by avoiding redundant work, not by weakening qualification or safety.
+- Quality and the Master Prompt remain binding. Save tokens by avoiding redundant work, not by weakening qualification, reasoning or safety.
 - Reuse the current tab and current Airtable context instead of re-reading the same records repeatedly.
 - Prefer direct navigation and batched actions when the target is already known.
-- Keep internal memory and final reports concise; do not narrate routine browser steps.
+- Keep final reports concise; do not narrate routine browser steps.
 - Stop immediately when the run has no meaningful next action.
 - Never manufacture activity merely to fill a quota.
 """
