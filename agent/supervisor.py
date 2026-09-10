@@ -80,12 +80,13 @@ def _current_task(db: Client, role: str, fallback: str) -> tuple[str, int, int]:
 
 
 def _has_child_retry(db: Client, job_id: str) -> bool:
+    # Any prior child retry counts, including failed/cancelled children. This prevents the
+    # same parent job from spawning a fresh retry every 10 minutes forever.
     rows = (
         db.table("agent_jobs")
         .select("id,input,status")
-        .in_("status", ["queued", "running", "completed"])
         .order("created_at", desc=True)
-        .limit(100)
+        .limit(250)
         .execute()
         .data
         or []
@@ -111,13 +112,17 @@ def _retry_job(db: Client, job: dict[str, Any]) -> str | None:
         return None
 
     task, max_steps, priority = _current_task(db, role, str(job.get("task") or ""))
-    new_input = input_data
+    new_input = dict(input_data)
     new_input["source"] = "supervisor-retry"
     new_input["retry_of"] = job_id
     new_input["supervisor_retry_count"] = retry_count + 1
     new_input["scheduled"] = False
     if role == "lead":
         new_input["target_new_profiles"] = 10
+        # Lead retries default to the zero-LLM deterministic research path unless they
+        # explicitly came from the short outreach phase.
+        if str(input_data.get("pipeline_phase") or "").lower() != "outreach":
+            new_input["pipeline_phase"] = "research_v3"
 
     created = (
         db.table("agent_jobs")
@@ -172,8 +177,6 @@ def run() -> dict[str, Any]:
                 "updated_at": now_iso(),
             }
         ).eq("id", job["id"]).execute()
-        job["status"] = "failed"
-        job["error"] = "Supervisor: stale running job exceeded 30 minutes; eligible for bounded retry."
         stale_marked += 1
 
     failed_rows = (
@@ -209,8 +212,7 @@ def run() -> dict[str, Any]:
 
 
 def main() -> None:
-    result = run()
-    print(result)
+    print(run())
 
 
 if __name__ == "__main__":
