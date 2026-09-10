@@ -25,11 +25,11 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
-      AGENT_WORKER_ID: github-actions-airtable-v2
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_MODEL: gemini-3.7-flash
+      AGENT_WORKER_ID: github-actions-airtable-v3-gemini
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
-      OLLAMA_MODEL: qwen3:4b
-      OLLAMA_HOST: http://127.0.0.1:11434
       LOGIN_TIMEOUT_SECONDS: "900"
       MAX_RUNTIME_SECONDS: "1200"
 
@@ -46,6 +46,9 @@ jobs:
           fi
           if [[ -z "$AIRTABLE_PAT" ]]; then
             echo "Airtable is not connected yet. Scheduled CRM jobs will fail closed."
+          fi
+          if [[ -z "$GOOGLE_API_KEY" ]]; then
+            echo "Gemini is not connected yet. Login jobs still work, but AI jobs will fail closed."
           fi
 
       - name: Enqueue due Supabase schedules
@@ -104,19 +107,6 @@ jobs:
             -o /tmp/cloudflared
           chmod +x /tmp/cloudflared
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
-
-      - name: Cache local AI model
-        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.ollama
-          key: ollama-qwen3-4b-v1
-
-      - name: Install Ollama
-        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
-        shell: bash
-        run: |
-          curl -fsSL https://ollama.com/install.sh | sh
 
       - name: Process next queued job
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
