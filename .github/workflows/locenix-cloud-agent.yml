@@ -10,7 +10,7 @@ on:
     - cron: "*/10 * * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: locenix-browser-agent
@@ -27,6 +27,7 @@ jobs:
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: gpt-5.6-luna
+      REPAIR_OPENAI_MODEL: gpt-5.6-luna
       MONTHLY_LLM_BUDGET_USD: "10"
       INBOX_FORCE_LLM_HOURS: "4"
       AGENT_WORKER_ID: github-actions-airtable-v4-luna
@@ -50,7 +51,7 @@ jobs:
             echo "Airtable is not connected. Scheduled CRM jobs fail closed."
           fi
           if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "OpenAI API is not connected yet. Zero-LLM gates/login can still work; AI jobs fail closed."
+            echo "OpenAI API is not connected yet. Zero-LLM supervisor/login can still work; AI jobs and LLM repair fail closed."
           fi
 
       - name: Checkout
@@ -70,11 +71,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Run LOCENIX supervisor
+      - name: Run LOCENIX deterministic supervisor
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
           python -m agent.supervisor
+
+      - name: Run LLM repair agent when needed
+        if: steps.config.outputs.ready == 'true' && env.OPENAI_API_KEY != ''
+        shell: bash
+        run: |
+          python -m agent.repair_agent
 
       - name: Enqueue due Supabase schedules
         if: steps.config.outputs.ready == 'true'
