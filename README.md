@@ -38,11 +38,11 @@ The scheduler is idempotent by role/time slot so repeated 15-minute checks do no
 
 ## Cost-control design
 
-Quality rules and the complete four Master Prompts remain binding. Cost is reduced by eliminating unnecessary inference instead of weakening qualification.
+The complete four Master Prompts, qualification rules, CRM rules and safety gates remain binding. Cost is reduced by eliminating unnecessary inference and repeated context rather than by weakening the work.
 
 ### 1. Zero-LLM hourly inbox gate
 
-Before a scheduled Inbox Agent run calls Luna, Playwright opens only the LinkedIn feed and reads the global Messaging navigation badge. It does **not** open a conversation. Airtable is checked directly for due follow-ups.
+Before a scheduled Inbox Agent run calls Luna, Playwright opens only the LinkedIn feed and reads the global Messaging navigation badge. It does **not** open a conversation. Airtable is checked directly for due follow-ups using the Europe/Berlin calendar date.
 
 Luna is called when any of these are true:
 
@@ -53,36 +53,52 @@ Luna is called when any of these are true:
 
 If none are true, the hourly job completes with `llm_skipped=true` and estimated LLM cost `0.0`.
 
-### 2. Token-efficient Browser Use
+The detector is fail-safe: if LinkedIn changes its DOM and the Messaging badge cannot be identified confidently, the run falls back to Luna rather than silently skipping work. Security/checkpoint URLs fail closed and require legitimate human verification.
 
-- `flash_mode=True`
-- visual input disabled for routine DOM navigation
-- model-visible thinking disabled
-- message compaction enabled
-- bounded recent history (10-12 items)
-- stable Master Prompt remains at the front for prompt-cache reuse
-- repeat Airtable reads and browser narration are explicitly discouraged
+### 2. Role-aware quality settings
 
-### 3. Hard budget protection
+The simple Inbox role is optimized aggressively because it runs most often:
+
+- low reasoning effort
+- Browser Use flash mode
+- no model-visible thinking
+- 24-step ceiling
+- 10 recent history items
+
+The more consequential roles retain higher-quality planning:
+
+- **Growth:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
+- **Lead:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
+- **Content:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
+
+Browser Use final judging remains enabled on AI runs. This keeps the main quality controls on the tasks where strategy, qualification and writing quality matter most.
+
+### 3. Token-efficient context
+
+- routine visual input remains disabled for DOM-based browser work
+- message compaction is enabled
+- recent browser history is bounded instead of growing without limit
+- the stable Master Prompt remains unchanged at the front so repeated prefixes can benefit from provider prompt caching
+- the agent is instructed to use shared Airtable context once and avoid redundant re-reads
+- browser-step narration is minimized
+- no activity is generated simply to satisfy a quota
+
+### 4. Hard budget protection
 
 Default monthly emergency cap: **$10** (`MONTHLY_LLM_BUDGET_USD`).
 
-Per-run emergency ceilings are intentionally generous and are not spending targets:
+Per-run emergency ceilings are deliberately above normal expected cost so they protect against loops without truncating healthy work:
 
 - Inbox: $0.25
 - Growth: $0.75
 - Lead: $0.75
 - Content: $0.75
 
-The worker records observed prompt tokens, cached prompt tokens, completion tokens and an estimated Luna cost into `agent_jobs.result`. Supabase aggregates those estimates for the current Europe/Berlin calendar month. Once the monthly cap is reached, further AI jobs fail closed instead of continuing to spend.
+The worker records prompt tokens, cached prompt tokens, completion tokens and an estimated Luna cost into `agent_jobs.result`. Supabase aggregates those estimates for the current Europe/Berlin calendar month. Once the monthly cap is reached, further AI jobs fail closed instead of continuing to spend.
 
-### 4. Quality safeguards stay on
+### 5. Runner efficiency
 
-- Browser Use final judging remains enabled for real AI runs.
-- Full lead/content/growth step ceilings remain high enough for complete work.
-- The Inbox gate falls back to Luna whenever detection is uncertain.
-- Every four hours an Inbox full sweep runs even when the badge is quiet.
-- Airtable duplicate protection, `Do Not Contact`, confirmation rules and visual approval remain unchanged.
+The 15-minute GitHub wake check does not install Chromium when there is no queued work. Ollama and multi-gigabyte local model downloads have been removed. Remote noVNC/cloudflared login packages are installed only for an explicit login job. One runner can process up to two queued jobs so simultaneous Inbox + Lead/Content schedule slots do not automatically need a second runner.
 
 ## Safety behavior
 
@@ -102,17 +118,17 @@ A `login` job opens a temporary noVNC view backed by Chromium on the GitHub runn
 python -m agent.airtable_worker --once
 ```
 
-The production adapter reuses the proven Supabase queue/profile/browser lifecycle in `agent.local_worker`, injects LOCENIX Airtable tools, performs the deterministic inbox cost gate, and swaps only the inference layer to GPT-5.6 Luna.
+The production adapter reuses the proven Supabase queue/profile/browser lifecycle in `agent.local_worker`, injects LOCENIX Airtable tools, performs the deterministic Inbox cost gate, and swaps only the inference layer to GPT-5.6 Luna.
 
 ## Relevant files
 
-- `agent/airtable_worker.py` — Luna adapter, token metering and budget enforcement
+- `agent/airtable_worker.py` — Luna adapter, role-aware quality settings, token metering and budget enforcement
 - `agent/cost_gate.py` — zero-LLM Inbox gate
 - `agent/local_worker.py` — GitHub Chromium, encrypted profile and queue lifecycle
 - `agent/airtable_tools.py` / `agent/extended_airtable_tools.py` — LOCENIX Airtable actions
 - `.github/workflows/locenix-cloud-agent.yml` — 15-minute scheduler wake + up to two queued jobs per runner
 - `wake.txt` — immediate manual/chat-triggered wake
 
-## Current rollout rule
+## Rollout rule
 
 Keep the four Supabase schedules disabled until `OPENAI_API_KEY` is present and a strict read-only Luna QA run confirms Airtable + restored LinkedIn + correct no-write behavior. Only then switch production scheduling from the old ChatGPT tasks to Supabase/GitHub.
