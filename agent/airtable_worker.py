@@ -9,6 +9,7 @@ from agent.extended_airtable_tools import add_extended_airtable_tools
 from agent.cost_gate import evaluate_inbox_gate, mark_inbox_llm_completed, probe_linkedin_message_badge
 from agent import local_worker
 from agent import profile_patch
+from agent import lead_v3
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna").strip()
 MONTHLY_LLM_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
@@ -108,6 +109,7 @@ COST-EFFICIENT EXECUTION RULES:
 - For Lead, research/CRM work comes before outreach. The minimum target is 10 new profiles, not 20.
 - Do not repeatedly reopen the same Sales Navigator result or re-read the same Airtable context in one run.
 - Keep only the minimum browser state needed for the current person. Do not carry large prior DOM snapshots forward.
+- Scheduled Lead research is handled by deterministic Playwright V3 with zero LLM calls. Luna is reserved for short outreach/personalization decisions.
 """
 
 
@@ -233,6 +235,7 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
     input_data = job.get("input") or {}
     role = str(input_data.get("agent_role") or "").strip().lower()
     scheduled = bool(input_data.get("scheduled"))
+    pipeline_phase = str(input_data.get("pipeline_phase") or "").strip().lower()
     policy = ROLE_POLICIES.get(role, DEFAULT_POLICY)
 
     if bool(input_data.get("cost_gate_probe_only")):
@@ -243,6 +246,11 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
             status="completed",
             result={"probe": probe, "llm_skipped": True, "estimated_llm_cost_usd": 0.0},
         )
+        return
+
+    if role == "lead" and pipeline_phase != "outreach":
+        # V3: scheduled/manual research is deterministic. No Browser-Use agent and no OpenAI call.
+        await lead_v3.run_deterministic_research(db, job)
         return
 
     if scheduled and role == "inbox":
