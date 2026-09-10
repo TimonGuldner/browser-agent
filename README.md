@@ -55,23 +55,16 @@ If none are true, the hourly job completes with `llm_skipped=true` and estimated
 
 The detector is fail-safe: if LinkedIn changes its DOM and the Messaging badge cannot be identified confidently, the run falls back to Luna rather than silently skipping work. Security/checkpoint URLs fail closed and require legitimate human verification.
 
-### 2. Role-aware quality settings
+### 2. Full quality whenever Luna is actually needed
 
-The simple Inbox role is optimized aggressively because it runs most often:
+The savings happen **before** inference. Once a real message, due follow-up, scheduled strategic task or periodic full sweep requires AI, the worker does not switch to a deliberately weakened model mode.
 
-- low reasoning effort
-- Browser Use flash mode
-- no model-visible thinking
-- 24-step ceiling
-- 10 recent history items
+- **Inbox:** medium reasoning, planning enabled, model-visible working state enabled, final judge enabled, up to 30 steps, 16 recent history items.
+- **Growth:** medium reasoning, planning enabled, model-visible working state enabled, final judge enabled, up to 40 steps, 20 recent history items.
+- **Lead:** medium reasoning, planning enabled, model-visible working state enabled, final judge enabled, up to 40 steps, 20 recent history items.
+- **Content:** medium reasoning, planning enabled, model-visible working state enabled, final judge enabled, up to 40 steps, 20 recent history items.
 
-The more consequential roles retain higher-quality planning:
-
-- **Growth:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
-- **Lead:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
-- **Content:** medium reasoning, planning enabled, model-visible working state enabled, 40-step ceiling
-
-Browser Use final judging remains enabled on AI runs. This keeps the main quality controls on the tasks where strategy, qualification and writing quality matter most.
+This means cost optimization is primarily event-driven execution, prompt caching and context compaction—not lower decision quality on real work.
 
 ### 3. Token-efficient context
 
@@ -122,12 +115,16 @@ The production adapter reuses the proven Supabase queue/profile/browser lifecycl
 
 ## Relevant files
 
-- `agent/airtable_worker.py` — Luna adapter, role-aware quality settings, token metering and budget enforcement
+- `agent/airtable_worker.py` — Luna adapter, full-quality role settings, token metering and budget enforcement
 - `agent/cost_gate.py` — zero-LLM Inbox gate
 - `agent/local_worker.py` — GitHub Chromium, encrypted profile and queue lifecycle
 - `agent/airtable_tools.py` / `agent/extended_airtable_tools.py` — LOCENIX Airtable actions
 - `.github/workflows/locenix-cloud-agent.yml` — 15-minute scheduler wake + up to two queued jobs per runner
 - `wake.txt` — immediate manual/chat-triggered wake
+
+## Verified zero-cost behavior
+
+A real restored LinkedIn session was tested with the hardened Messaging badge detector. It reported zero unread messages without opening a conversation. A complete scheduled Inbox QA path then completed with `llm_skipped=true`, `no_change=true` and estimated LLM cost `0.0`.
 
 ## Rollout rule
 
