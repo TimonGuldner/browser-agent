@@ -3,4 +3,4 @@ Updating this file triggers the GitHub Actions runner.
 Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries.
 Cost Architecture V3 enabled: scheduled Lead research uses deterministic Playwright + Airtable dedupe with zero LLM calls; Luna is reserved for short outreach/personalization decisions.
 Lead target: 10. Research and outreach are split.
-Wake: run dual-inbox read-only QA probe for LinkedIn + Sales Navigator.
+Wake: run broadened dual-inbox read-only QA probe v2 for LinkedIn + Sales Navigator.
