@@ -1,5 +1,6 @@
 LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
 Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries.
-Cost Architecture V2 enabled: Lead research and outreach are split; lead target is 10; outbound phase uses existing qualified CRM leads only.
-Wake: run cost-optimized outreach v2.
+Cost Architecture V3 enabled: scheduled Lead research uses deterministic Playwright + Airtable dedupe with zero LLM calls; Luna is reserved for short outreach/personalization decisions.
+Lead target: 10. Research and outreach are split.
+Wake: run deterministic V3 research test.
