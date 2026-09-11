@@ -1,23 +1,26 @@
 import asyncio
-import io
 import json
 import os
 import secrets
 import signal
 import subprocess
 import sys
-import tarfile
 import time
 from pathlib import Path
 
 import httpx
-from playwright.async_api import async_playwright
+from browser_use import Agent
+from browser_use.browser import BrowserProfile, BrowserSession
+from browser_use.llm import ChatOpenAI
 
 from agent import local_worker
 
 SESSION_FILE = Path('/tmp/google_ads_login_v5_session.json')
 CREDS_FILE = Path('google_ads_login_v5_credentials.json')
+RESULT_FILE = Path('google_ads_conversion_result.json')
 LOGIN_TIMEOUT_SECONDS = int(os.getenv('GOOGLE_LOGIN_TIMEOUT_SECONDS', '900'))
+ACCOUNT_ID = '475-469-4125'
+MODEL = os.getenv('OPENAI_MODEL', 'gpt-5.6-luna').strip()
 
 
 def alive(pid: int) -> bool:
@@ -55,50 +58,19 @@ def chrome_logged_into_ads() -> bool:
         return False
 
 
-def save_minimal_profile(db) -> int:
-    root = local_worker.PROFILE_DIR
-    raw = io.BytesIO()
-    wanted = [
-        root / 'Local State',
-        root / 'Default' / 'Cookies',
-        root / 'Default' / 'Cookies-journal',
-        root / 'Default' / 'Preferences',
-        root / 'Default' / 'Secure Preferences',
-        root / 'Default' / 'Network Persistent State',
-        root / 'Default' / 'TransportSecurity',
-        root / 'Default' / 'Web Data',
-        root / 'Default' / 'Web Data-journal',
-        root / 'Default' / 'Local Storage',
-        root / 'Default' / 'Session Storage',
-        root / 'Default' / 'IndexedDB',
-    ]
-    with tarfile.open(fileobj=raw, mode='w:gz') as tar:
-        for item in wanted:
-            if item.exists():
-                tar.add(item, arcname=str(item.relative_to(root)), recursive=True)
-    encrypted = local_worker.derive_fernet().encrypt(raw.getvalue())
-    store = db.storage.from_(local_worker.PROFILE_BUCKET)
-    try:
-        store.update(local_worker.PROFILE_OBJECT, encrypted, {'content-type': 'application/octet-stream', 'upsert': 'true'})
-    except Exception:
-        try:
-            store.remove([local_worker.PROFILE_OBJECT])
-        except Exception:
-            pass
-        store.upload(local_worker.PROFILE_OBJECT, encrypted, {'content-type': 'application/octet-stream', 'upsert': 'true'})
-    return len(encrypted)
+def write_result(payload: dict) -> None:
+    RESULT_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    print('GOOGLE_ADS_RESULT=' + json.dumps(payload, ensure_ascii=False), flush=True)
 
 
 def start() -> None:
-    db = local_worker.db_client()
-    local_worker.restore_profile(db)
     chromium = local_worker.find_chromium()
     env = os.environ.copy()
     env['DISPLAY'] = ':99'
     env.pop('RUNNER_TRACKING_ID', None)
     local_worker.PROFILE_DIR.mkdir(parents=True, exist_ok=True)
 
-    pids = []
+    pids: list[int] = []
     xvfb = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1440x1000x24'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
     pids.append(xvfb.pid)
     time.sleep(1.5)
@@ -114,10 +86,19 @@ def start() -> None:
     cf_log = '/tmp/cloudflared-google-v5.log'
     cf = subprocess.Popen(['cloudflared', 'tunnel', '--url', 'http://127.0.0.1:6080', '--no-autoupdate', '--loglevel', 'info', '--logfile', cf_log], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
     pids.append(cf.pid)
+
     chrome = subprocess.Popen([
-        chromium, '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--password-store=basic',
-        f'--user-data-dir={local_worker.PROFILE_DIR}', '--window-size=1440,1000', '--no-first-run',
-        '--no-default-browser-check', '--remote-debugging-port=9222', 'https://ads.google.com/aw/overview',
+        chromium,
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--password-store=basic',
+        f'--user-data-dir={local_worker.PROFILE_DIR}',
+        '--window-size=1440,1000',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--remote-debugging-port=9222',
+        'https://ads.google.com/aw/overview',
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, start_new_session=True)
     pids.append(chrome.pid)
 
@@ -142,56 +123,98 @@ def start() -> None:
         'live_url': tunnel + '/vnc.html?autoconnect=true&resize=remote&quality=6',
         'vnc_password': vnc_password,
         'expires_seconds': LOGIN_TIMEOUT_SECONDS,
+        'instruction': 'Sign in to Google Ads only inside this remote browser. The agent will detect login automatically and continue in the same browser.',
     }, indent=2), encoding='utf-8')
+    print('Google Ads live login browser started.', flush=True)
 
 
-async def verify_saved(chromium: str) -> bool:
-    async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            str(local_worker.PROFILE_DIR), executable_path=chromium, headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--password-store=basic'],
-        )
-        try:
-            page = context.pages[0] if context.pages else await context.new_page()
-            await page.goto('https://ads.google.com/aw/overview', wait_until='domcontentloaded', timeout=60000)
-            await page.wait_for_timeout(5000)
-            u = page.url
-            return 'accounts.google.com' not in u and 'signin' not in u.lower() and 'ServiceLogin' not in u
-        finally:
-            await context.close()
-
-
-async def wait_and_save() -> None:
-    db = local_worker.db_client()
+async def run_live_conversion() -> None:
     state = json.loads(SESSION_FILE.read_text(encoding='utf-8'))
-    deadline = float(state['started_at']) + LOGIN_TIMEOUT_SECONDS
     pids = [int(x) for x in state['pids']]
-    detected = False
+    deadline = float(state['started_at']) + LOGIN_TIMEOUT_SECONDS
+
     try:
         while time.time() < deadline:
             if chrome_logged_into_ads():
-                detected = True
+                print('GOOGLE_LOGIN_DETECTED=true', flush=True)
                 break
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
+        else:
+            write_result({'status': 'blocked', 'reason': 'GOOGLE_LOGIN_TIMEOUT', 'message': 'Google Ads login was not detected before timeout. No account settings were changed.'})
+            raise RuntimeError('Google Ads login timeout')
+
+        api_key = os.getenv('OPENAI_API_KEY', '').strip()
+        if not api_key:
+            write_result({'status': 'blocked', 'reason': 'NO_OPENAI_KEY'})
+            raise RuntimeError('OPENAI_API_KEY missing')
+
+        browser_session = BrowserSession(
+            browser_profile=BrowserProfile(
+                cdp_url='http://127.0.0.1:9222',
+                is_local=True,
+                allowed_domains=['ads.google.com', 'accounts.google.com', 'google.com', 'www.google.com', 'support.google.com'],
+                keep_alive=True,
+            )
+        )
+        llm = ChatOpenAI(
+            model=MODEL,
+            api_key=api_key,
+            reasoning_effort='medium',
+            max_completion_tokens=3500,
+            timeout=120,
+            max_retries=2,
+        )
+
+        task = f'''Work ONLY inside the already authenticated Google Ads browser session and ONLY in LOCENIX customer account {ACCOUNT_ID}.
+
+GOAL: Create/import the missing conversion action from the already linked GA4 property for event `purchase`, which LOCENIX fires after a verified successful Stripe trial checkout.
+
+Steps:
+1. Confirm the active Google Ads customer is {ACCOUNT_ID}. If not, stop without changing anything.
+2. Open Goals / Conversions / Summary.
+3. If an existing suitable GA4 `purchase` conversion already exists, do not create a duplicate. Verify it is enabled and primary/used for bidding if appropriate, then finish.
+4. Otherwise create/import a conversion from the linked Google Analytics 4 property and select event `purchase`.
+5. Make it the primary conversion / included in account-level conversion goals if the UI offers this.
+6. Return to the conversions overview and verify the action is present.
+
+HARD SAFETY RULES:
+- Do NOT enable, pause, create, delete, rename, or edit any campaign, ad group, ad, keyword, asset, audience, budget, bidding strategy, geo target, schedule, billing setting, payment setting, user, permission, or spend setting.
+- Campaign `LOCENIX | Search | High Intent | DE` must remain PAUSED.
+- Do NOT change any budget and do not cause ad spend.
+- Do NOT bypass CAPTCHA, 2FA, security checkpoints, or account verification. If one appears, stop and report it.
+- If `purchase` cannot be imported from GA4, stop and report the exact blocker instead of creating a different event or website conversion.
+
+Finish with: conversion action name, whether it was created or already existed, whether it is primary, and confirmation that the LOCENIX campaign stayed paused and no budget changed.'''
+
+        agent = Agent(
+            task=task,
+            llm=llm,
+            browser_session=browser_session,
+            use_vision=False,
+            max_history_items=10,
+            message_compaction=True,
+            use_judge=True,
+            enable_planning=True,
+        )
+        history = await asyncio.wait_for(agent.run(max_steps=40), timeout=1100)
+        payload = {
+            'status': 'completed' if history.is_successful() else 'failed',
+            'is_done': history.is_done(),
+            'is_successful': history.is_successful(),
+            'final_result': history.final_result() or '',
+            'errors': [str(e) for e in history.errors() if e],
+        }
+        write_result(payload)
     finally:
         stop_pids(pids)
-        await asyncio.sleep(2)
-        saved = save_minimal_profile(db)
-        print(f'GOOGLE_MINIMAL_PROFILE_SAVED_BYTES={saved}', flush=True)
-    if not detected:
-        raise RuntimeError('Google Ads login was not detected before timeout.')
-    chromium = local_worker.find_chromium()
-    if not await verify_saved(chromium):
-        raise RuntimeError('Minimal Google Ads profile was saved but did not authenticate on verification.')
-    print('GOOGLE_LOGIN_VERIFIED=true', flush=True)
 
 
 def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else 'start'
     if command == 'start':
         start()
-    elif command == 'wait':
-        asyncio.run(wait_and_save())
+    elif command == 'run':
+        asyncio.run(run_live_conversion())
     else:
         raise SystemExit(f'Unknown command: {command}')
 
