@@ -2,6 +2,6 @@
   "status": "failed",
   "is_done": true,
   "is_successful": false,
-  "final_result": "I could not proceed because the available Google Ads tab is at the Google Accounts sign-in page rather than an already authenticated session. I cannot verify customer account 475-469-4125 or access Goals / Conversions / Summary without signing in, and I did not attempt to bypass authentication or make any changes. No conversion action was created or modified; no campaign or budget settings were changed.",
+  "final_result": "Unable to complete the conversion setup safely. The active Google Ads customer was confirmed as LOCENIX, customer ID 475-469-4125. The existing conversion overview previously showed no visible `purchase` conversion, and the linked GA4 property 549213640 was available in the import flow. However, the import flow was interrupted because the unrelated call-conversion source could not be verifiably deselected, and subsequent attempts to reopen the conversion overview did not produce a visible page change. Therefore I did not create or edit any conversion action, and I cannot truthfully provide a conversion action name or primary-status result. The LOCENIX campaign was previously confirmed paused, and no budget or campaign settings were changed.",
   "errors": []
 }
