@@ -1,0 +1,50 @@
+name: LOCENIX Google Ads Login Session
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - google_ads_login_wake.txt
+  workflow_dispatch:
+
+concurrency:
+  group: locenix-google-ads-login-session
+  cancel-in-progress: true
+
+jobs:
+  login-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    env:
+      SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PROFILE_BUCKET: locenix-agent-private
+      PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
+      GOOGLE_LOGIN_TIMEOUT_SECONDS: "900"
+
+    steps:
+      - name: Check required secret
+        run: test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing SUPABASE_SERVICE_ROLE_KEY" && exit 1)
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb x11vnc novnc websockify
+          curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
+          chmod +x /tmp/cloudflared
+          sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+
+      - name: Open temporary Google Ads login browser
+        run: python -m agent.google_ads_login_session
