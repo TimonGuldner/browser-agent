@@ -51,9 +51,11 @@ def chrome_logged_into_ads() -> bool:
     try:
         tabs = httpx.get('http://127.0.0.1:9222/json', timeout=3).json()
         urls = [str(tab.get('url') or '') for tab in tabs if isinstance(tab, dict)]
-        ads_open = any('ads.google.com' in u and 'nav/login' not in u and 'signin' not in u.lower() for u in urls)
-        login_open = any('accounts.google.com' in u or 'ServiceLogin' in u for u in urls)
-        return ads_open and not login_open
+        titles = [str(tab.get('title') or '') for tab in tabs if isinstance(tab, dict)]
+        ads_open = any('/aw/' in u and 'ads.google.com' in u and 'nav/login' not in u and 'signin' not in u.lower() for u in urls)
+        login_open = any('accounts.google.com' in u or 'ServiceLogin' in u or 'signin' in u.lower() for u in urls)
+        sign_in_title = any('sign in' in t.lower() or 'anmelden' in t.lower() for t in titles)
+        return ads_open and not login_open and not sign_in_title
     except Exception:
         return False
 
@@ -123,7 +125,7 @@ def start() -> None:
         'live_url': tunnel + '/vnc.html?autoconnect=true&resize=remote&quality=6',
         'vnc_password': vnc_password,
         'expires_seconds': LOGIN_TIMEOUT_SECONDS,
-        'instruction': 'Sign in to Google Ads only inside this remote browser. The agent will detect login automatically and continue in the same browser.',
+        'instruction': 'Sign in to Google Ads only inside this remote browser. The agent waits for a stable authenticated Ads session before continuing.',
     }, indent=2), encoding='utf-8')
     print('Google Ads live login browser started.', flush=True)
 
@@ -131,14 +133,23 @@ def start() -> None:
 async def run_live_conversion() -> None:
     state = json.loads(SESSION_FILE.read_text(encoding='utf-8'))
     pids = [int(x) for x in state['pids']]
-    deadline = float(state['started_at']) + LOGIN_TIMEOUT_SECONDS
+    started_at = float(state['started_at'])
+    deadline = started_at + LOGIN_TIMEOUT_SECONDS
 
     try:
+        # Give Google enough time to redirect the initial /aw/ URL to the real sign-in page.
+        await asyncio.sleep(20)
+        consecutive_ok = 0
         while time.time() < deadline:
             if chrome_logged_into_ads():
-                print('GOOGLE_LOGIN_DETECTED=true', flush=True)
-                break
-            await asyncio.sleep(2)
+                consecutive_ok += 1
+                print(f'GOOGLE_LOGIN_STABILITY_CHECK={consecutive_ok}/5', flush=True)
+                if consecutive_ok >= 5:
+                    print('GOOGLE_LOGIN_DETECTED=true', flush=True)
+                    break
+            else:
+                consecutive_ok = 0
+            await asyncio.sleep(3)
         else:
             write_result({'status': 'blocked', 'reason': 'GOOGLE_LOGIN_TIMEOUT', 'message': 'Google Ads login was not detected before timeout. No account settings were changed.'})
             raise RuntimeError('Google Ads login timeout')
