@@ -1,9 +1,7 @@
 {
-  "status": "blocked",
-  "reason": "GOOGLE_LOGIN_REQUIRED",
-  "message": "The saved LOCENIX browser profile is not authenticated in Google Ads. No account settings were changed.",
-  "preflight": {
-    "login_required": true,
-    "title": "Google Ads - Sign in"
-  }
+  "status": "failed",
+  "is_done": true,
+  "is_successful": false,
+  "final_result": "I could not proceed because the available Google Ads tab is at the Google Accounts sign-in page rather than an already authenticated session. I cannot verify customer account 475-469-4125 or access Goals / Conversions / Summary without signing in, and I did not attempt to bypass authentication or make any changes. No conversion action was created or modified; no campaign or budget settings were changed.",
+  "errors": []
 }
