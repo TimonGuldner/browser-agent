@@ -1,0 +1,9 @@
+{
+  "status": "blocked",
+  "reason": "GOOGLE_LOGIN_REQUIRED",
+  "message": "The saved LOCENIX browser profile is not authenticated in Google Ads. No account settings were changed.",
+  "preflight": {
+    "login_required": true,
+    "title": "Google Ads - Sign in"
+  }
+}
