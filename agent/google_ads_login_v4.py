@@ -119,6 +119,17 @@ def start() -> None:
     print('Isolated Google Ads login browser started.', flush=True)
 
 
+def chrome_is_logged_into_google_ads() -> bool:
+    try:
+        tabs = httpx.get('http://127.0.0.1:9222/json', timeout=3).json()
+        urls = [str(tab.get('url') or '') for tab in tabs if isinstance(tab, dict)]
+        ads_open = any('ads.google.com' in url and 'nav/login' not in url and 'signin' not in url.lower() for url in urls)
+        google_login_open = any('accounts.google.com' in url or 'ServiceLogin' in url for url in urls)
+        return ads_open and not google_login_open
+    except Exception:
+        return False
+
+
 async def verify_saved_login(chromium: str) -> dict:
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
@@ -143,9 +154,13 @@ async def wait_and_save() -> None:
     session_token = str(state['session_token'])
     deadline = float(state['started_at']) + LOGIN_TIMEOUT_SECONDS
     signaled = False
+    detected = False
 
     try:
         while time.time() < deadline:
+            if chrome_is_logged_into_google_ads():
+                detected = True
+                break
             try:
                 r = httpx.get(FLAG_URL, params={'t': str(time.time())}, timeout=5, headers={'Cache-Control': 'no-cache'})
                 if r.status_code == 200 and r.text.strip() == session_token:
@@ -160,7 +175,7 @@ async def wait_and_save() -> None:
         saved_bytes = local_worker.save_profile(db)
         print(f'GOOGLE_PROFILE_SAVED_BYTES={saved_bytes}', flush=True)
 
-    if not signaled:
+    if not (signaled or detected):
         raise RuntimeError('Google Ads login was not confirmed before the temporary session expired.')
 
     chromium = local_worker.find_chromium()
