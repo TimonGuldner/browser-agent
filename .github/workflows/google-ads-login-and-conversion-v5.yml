@@ -47,7 +47,7 @@ jobs:
           curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
           chmod +x /tmp/cloudflared
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
-      - name: Start lightweight Google Ads login browser
+      - name: Start Google Ads login browser
         run: python -m agent.google_ads_login_v5 start
       - name: Upload private login credentials
         uses: actions/upload-artifact@v4
@@ -55,11 +55,10 @@ jobs:
           name: google-ads-login-v5-credentials
           path: google_ads_login_v5_credentials.json
           retention-days: 1
-      - name: Auto-detect login and save lightweight profile
-        run: python -m agent.google_ads_login_v5 wait
-      - name: Run Google Ads conversion setup
-        run: python -m agent.google_ads_conversion_setup
+      - name: Auto-detect login and run conversion in same browser
+        run: python -m agent.google_ads_login_v5 run
       - name: Persist sanitized conversion result
+        if: always()
         run: |
           if [[ -f google_ads_conversion_result.json ]]; then
             git config user.name "LOCENIX Browser Agent"
@@ -67,6 +66,7 @@ jobs:
             git add google_ads_conversion_result.json
             if ! git diff --cached --quiet; then
               git commit -m "chore: record Google Ads conversion setup result"
-              git push
+              git pull --rebase origin main || true
+              git push || true
             fi
           fi
