@@ -1,2 +1,2 @@
 Open temporary Google Ads login session for LOCENIX.
-Triggered: 2026-09-11
+Triggered: 2026-09-11 private-artifact-v2
