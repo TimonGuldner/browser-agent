@@ -46,5 +46,16 @@ jobs:
           chmod +x /tmp/cloudflared
           sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
 
-      - name: Open temporary Google Ads login browser
-        run: python -m agent.google_ads_login_session
+      - name: Start temporary Google Ads login browser
+        run: python -m agent.google_ads_login_session start
+
+      - name: Upload private login credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-ads-login-credentials
+          path: google_ads_login_credentials.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Wait for Google Ads login and save encrypted profile
+        run: python -m agent.google_ads_login_session wait
