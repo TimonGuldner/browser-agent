@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: locenix-google-ads-login-session
+  group: locenix-google-ads-login-session-v2
   cancel-in-progress: true
 
 jobs:
