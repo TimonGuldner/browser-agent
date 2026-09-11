@@ -49,7 +49,7 @@ async def google_login_preflight(chromium: str) -> dict[str, Any]:
                 or "signin" in url.lower()
                 or "ServiceLogin" in url
             )
-            return {"login_required": login_required, "url": url, "title": title}
+            return {"login_required": login_required, "title": title}
         finally:
             await context.close()
 
