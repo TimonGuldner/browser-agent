@@ -65,11 +65,11 @@ jobs:
         run: |
           git config user.name 'locenix-linkedin-department-head'
           git config user.email 'actions@users.noreply.github.com'
-          git add results/linkedin_department_latest.json results/linkedin_department_state.json
+          git add results/linkedin_department_latest.json results/linkedin_department_state.json results/linkedin_execution_state.json
           if git diff --cached --quiet; then
             echo 'No department report changes'
           else
-            git commit -m 'Update LinkedIn department management report'
+            git commit -m 'Update LinkedIn department management and execution report'
             git pull --rebase
             git push
           fi
