@@ -1,42 +1,50 @@
 {
-  "last_run_at": "2026-09-12T11:20:49.703967+00:00",
-  "department_status": "HEALTHY",
-  "department_health": "HEALTHY",
-  "leads": "UNKNOWN",
-  "qualified_leads": "UNKNOWN",
-  "active_conversations": "UNKNOWN",
-  "replies": "UNKNOWN",
-  "positive_signals": "UNKNOWN",
-  "open_followups": "UNKNOWN",
-  "overdue_followups": "UNKNOWN",
-  "visibility_checks_offered": "UNKNOWN",
-  "visibility_checks_accepted": "UNKNOWN",
-  "trials": "UNKNOWN",
-  "paid_customers": "UNKNOWN",
-  "queue_backlog": 0,
-  "failed_jobs": "UNKNOWN",
-  "queued_jobs": "UNKNOWN",
-  "account_risk": "UNKNOWN",
+  "last_run_at": "2026-09-12T11:22:05.653728+00:00",
+  "department_status": "BLOCKED",
+  "department_health": "BLOCKED",
+  "leads": 61,
+  "qualified_leads": 13,
+  "active_conversations": 4,
+  "replies": 2,
+  "positive_signals": 1,
+  "open_followups": 0,
+  "overdue_followups": 0,
+  "visibility_checks_offered": 1,
+  "visibility_checks_accepted": 1,
+  "trials": 0,
+  "paid_customers": 0,
+  "queue_backlog": 8,
+  "failed_jobs": 61,
+  "queued_jobs": 0,
+  "account_risk": true,
   "agent_health": {
     "Inbox": "UNKNOWN",
     "Growth": "UNKNOWN",
     "Lead": "UNKNOWN",
     "Content": "UNKNOWN",
-    "Browser Worker": "UNKNOWN"
+    "Browser Worker": "HEALTHY"
   },
-  "biggest_bottleneck": "GROWTH",
+  "biggest_bottleneck": "SYSTEM_SAFETY",
   "priority_1": {
-    "type": "GROWTH",
-    "action": "No observed downstream bottleneck; keep conservative qualified lead generation active.",
-    "owner": "Lead Agent"
+    "type": "SYSTEM_SAFETY",
+    "action": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
+    "owner": "Browser Worker"
   },
-  "priority_2": null,
-  "priority_3": null,
+  "priority_2": {
+    "type": "POSITIVE_REPLIES",
+    "action": "Prioritize positive replies and active qualified conversations before new prospecting.",
+    "owner": "Conversation / Inbox Agent"
+  },
+  "priority_3": {
+    "type": "ACTIVE_CONVERSATIONS",
+    "action": "Work active conversations before generating additional outreach volume.",
+    "owner": "Conversation Agent"
+  },
   "current_experiment": "UNKNOWN",
   "main_learning": "Operational LinkedIn metrics are now read directly from Airtable and Supabase; missing fields remain UNKNOWN.",
   "directive_status": "NONE",
   "received_ceo_directive": null,
-  "human_decision_required": false,
-  "ceo_escalation_required": false,
-  "ceo_message": "No CEO intervention required from currently observed evidence."
+  "human_decision_required": true,
+  "ceo_escalation_required": true,
+  "ceo_message": "Pause risky LinkedIn actions and escalate the observed account/security signal."
 }
