@@ -1,1 +1,1 @@
-wake 2026-09-12 Agent 8 after false-risk fix
+wake 2026-09-12 Agent 8 execution enforcement test
