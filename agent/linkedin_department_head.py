@@ -57,6 +57,38 @@ def iso_dt(v):
     except Exception: return None
 def field(row,name,default=None): return (row.get('fields') or {}).get(name,default)
 
+def explicit_security_risk(job: dict[str, Any]) -> bool:
+    """Only classify an account/security risk from explicit positive evidence.
+
+    Do not flag jobs merely because their result text mentions words like CAPTCHA,
+    checkpoint or verification in a negated sentence or in generic safety instructions.
+    """
+    result = job.get('result') or {}
+    final_result = str(result.get('final_result') or '').lower()
+    errors = ' | '.join(str(e) for e in (result.get('errors') or [])).lower()
+    text = f'{final_result} | {errors}'
+
+    negative_phrases = (
+        'kein sichtbarer login-, authwall-, checkpoint- oder verifikationsblocker',
+        'kein checkpoint', 'keine verifikation', 'keine menschliche verifikation',
+        'no checkpoint', 'no verification', 'no security blocker',
+        'without checkpoint', 'without verification', 'nicht blockiert',
+    )
+    for phrase in negative_phrases:
+        text = text.replace(phrase, '')
+
+    explicit_positive = (
+        'captcha required', 'captcha angezeigt', 'captcha erschienen', 'captcha erkannt',
+        'checkpoint required', 'checkpoint angezeigt', 'checkpoint erschienen', 'checkpoint erkannt',
+        'verification required', 'verifikation erforderlich', 'verifizierung erforderlich',
+        'human verification required', 'menschliche verifikation erforderlich',
+        '2fa required', '2fa erforderlich', 'two-factor authentication required',
+        'rate limit exceeded', 'rate limited', 'rate-limit erreicht', 'rate limit erreicht',
+        'security checkpoint detected', 'security checkpoint required',
+        'account restricted', 'konto eingeschränkt', 'account temporarily restricted',
+    )
+    return any(term in text for term in explicit_positive)
+
 def metrics_from_sources():
     people=airtable_records(TABLES['people']); queue=airtable_records(TABLES['queue']); runs=airtable_records(TABLES['run_reports'],200)
     jobs=supabase_rows('agent_jobs','select=id,status,mode,priority,created_at,updated_at,result&order=created_at.desc&limit=200')
@@ -81,12 +113,10 @@ def metrics_from_sources():
     recent_jobs=[j for j in jobs if (iso_dt(j.get('created_at')) or datetime.min.replace(tzinfo=timezone.utc))>=cutoff]
     failed_jobs=sum(1 for j in recent_jobs if str(j.get('status','')).lower()=='failed') if jobs else 'UNKNOWN'
     queued_jobs=sum(1 for j in jobs if str(j.get('status','')).lower()=='queued') if jobs else 'UNKNOWN'
-    risk_terms=('captcha','checkpoint','security checkpoint','verification required','rate limit','2fa','human verification')
     risk_hits=[]
     for j in recent_jobs:
         if str(j.get('status','')).lower() not in {'failed','blocked','waiting_approval','running'}: continue
-        blob=json.dumps(j.get('result') or {},ensure_ascii=False).lower()
-        if any(t in blob for t in risk_terms): risk_hits.append(str(j.get('id')))
+        if explicit_security_risk(j): risk_hits.append(str(j.get('id')))
     account_risk=bool(risk_hits) if jobs else 'UNKNOWN'
     role_health={r:'UNKNOWN' for r in ('Inbox','Growth','Lead','Content')}
     if runs:
@@ -116,7 +146,7 @@ def main():
         if i>=len(priorities): return None
         typ,action,owner=priorities[i]; return {'type':typ,'action':action,'owner':owner}
     directive_status='RECEIVED' if isinstance(directive,dict) and directive.get('owner_agent')=='AGENT_8_LINKEDIN_DEPARTMENT_HEAD' else 'NONE'
-    report={'agent':'AGENT_8_LINKEDIN_DEPARTMENT_HEAD','reports_to':'AGENT_0_LOCENIX_CEO','last_run_at':now,'department_status':status,'department_health':status,**metrics,'biggest_bottleneck':priorities[0][0],'priority_1':p(0),'priority_2':p(1),'priority_3':p(2),'current_experiment':'UNKNOWN','main_learning':'Operational LinkedIn metrics are read directly from Airtable and Supabase; operational risk only uses recent active/failed jobs, not historical noise.','received_ceo_directive':directive if directive_status=='RECEIVED' else None,'directive_status':directive_status,'human_decision_required':metrics['account_risk'] is True,'ceo_escalation_required':metrics['account_risk'] is True,'ceo_message':priorities[0][1] if metrics['account_risk'] is True else 'No CEO intervention required from currently observed evidence.','guardrails':cfg.get('rules',{})}
+    report={'agent':'AGENT_8_LINKEDIN_DEPARTMENT_HEAD','reports_to':'AGENT_0_LOCENIX_CEO','last_run_at':now,'department_status':status,'department_health':status,**metrics,'biggest_bottleneck':priorities[0][0],'priority_1':p(0),'priority_2':p(1),'priority_3':p(2),'current_experiment':'UNKNOWN','main_learning':'Operational LinkedIn metrics are read directly from Airtable and Supabase. Account risk now requires explicit positive security evidence; negated mentions do not trigger a block.','received_ceo_directive':directive if directive_status=='RECEIVED' else None,'directive_status':directive_status,'human_decision_required':metrics['account_risk'] is True,'ceo_escalation_required':metrics['account_risk'] is True,'ceo_message':priorities[0][1] if metrics['account_risk'] is True else 'No CEO intervention required from currently observed evidence.','guardrails':cfg.get('rules',{})}
     OUT.parent.mkdir(parents=True,exist_ok=True); OUT.write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     keys=('last_run_at','department_status','department_health','leads','qualified_leads','active_conversations','replies','positive_signals','open_followups','overdue_followups','visibility_checks_offered','visibility_checks_accepted','trials','paid_customers','queue_backlog','failed_jobs','queued_jobs','account_risk','agent_health','biggest_bottleneck','priority_1','priority_2','priority_3','current_experiment','main_learning','directive_status','received_ceo_directive','human_decision_required','ceo_escalation_required','ceo_message')
     STATE.write_text(json.dumps({k:report.get(k,'UNKNOWN') for k in keys},ensure_ascii=False,indent=2)+'\n',encoding='utf-8'); print(json.dumps(report,ensure_ascii=False))
