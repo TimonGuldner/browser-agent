@@ -5,6 +5,7 @@ import os
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
@@ -12,11 +13,17 @@ SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 AIRTABLE_PAT = os.environ['AIRTABLE_PAT']
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', 'appN6ox7fjGFyXZhL')
 RUN_REPORTS = 'tblntmY8DXjSJWq8t'
+STATE = Path('results/linkedin_execution_state.json')
 
 DAILY_TARGETS = {
     'qualified_leads_found': 10,
     'connection_requests': 5,
 }
+
+
+def save(obj: dict) -> None:
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
 def get_json(url: str, headers: dict[str, str]) -> object:
@@ -97,31 +104,39 @@ def enqueue(role: str, *, phase: str | None = None, target: int | None = None, p
 def main() -> None:
     now = datetime.now(ZoneInfo('Europe/Berlin'))
     if not (8 <= now.hour < 20):
-        print(json.dumps({'status': 'outside_business_hours'}))
+        result = {'status': 'outside_business_hours', 'checked_at': now.isoformat(), 'daily_targets': DAILY_TARGETS}
+        save(result)
+        print(json.dumps(result, ensure_ascii=False))
         return
 
     metrics = airtable_today()
     active = existing_active_roles()
     created: list[dict[str, str]] = []
 
-    # Existing conversations always come first. Inbox is allowed to decide that no message is needed.
     if (metrics['positive_replies'] > 0 or metrics['active_conversations'] > 0 or metrics['replies_received'] > 0) and 'inbox' not in active:
         created.append({'role': 'inbox', 'job_id': enqueue('inbox', priority_boost=30)})
         active.add('inbox')
 
-    # Keep lead collection moving every business day until the daily target is met.
     if metrics['qualified_leads_found'] < DAILY_TARGETS['qualified_leads_found'] and 'lead' not in active:
         remaining = max(1, DAILY_TARGETS['qualified_leads_found'] - metrics['qualified_leads_found'])
         created.append({'role': 'lead', 'job_id': enqueue('lead', phase='research_v3', target=min(10, remaining), priority_boost=10)})
         active.add('lead')
 
-    # Do not let a day end with zero outbound activity when qualified capacity exists.
-    # Growth handles conservative relationship-building; existing safety and CRM rules stay binding.
     if metrics['connection_requests'] < DAILY_TARGETS['connection_requests'] and 'growth' not in active:
         created.append({'role': 'growth', 'job_id': enqueue('growth', priority_boost=5)})
         active.add('growth')
 
-    print(json.dumps({'status': 'ok', 'daily_metrics': metrics, 'daily_targets': DAILY_TARGETS, 'created_jobs': created}, ensure_ascii=False))
+    result = {
+        'status': 'ok',
+        'checked_at': now.isoformat(),
+        'daily_metrics': metrics,
+        'daily_targets': DAILY_TARGETS,
+        'created_jobs': created,
+        'active_roles_after_check': sorted(active),
+        'rule': 'Agent 8 must create executable work when daily outcomes are below target, while existing CRM/safety guardrails remain binding.',
+    }
+    save(result)
+    print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == '__main__':
