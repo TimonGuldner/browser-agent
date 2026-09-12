@@ -1,7 +1,7 @@
 {
-  "last_run_at": "2026-09-12T18:14:28.966401+00:00",
-  "department_status": "ATTENTION",
-  "department_health": "ATTENTION",
+  "last_run_at": "2026-09-12T18:15:12.809395+00:00",
+  "department_status": "HEALTHY",
+  "department_health": "HEALTHY",
   "leads": 61,
   "qualified_leads": 13,
   "active_conversations": 4,
@@ -14,15 +14,15 @@
   "trials": 0,
   "paid_customers": 0,
   "queue_backlog": 8,
-  "failed_jobs": 4,
-  "queued_jobs": 0,
-  "account_risk": false,
+  "failed_jobs": "UNKNOWN",
+  "queued_jobs": "UNKNOWN",
+  "account_risk": "UNKNOWN",
   "agent_health": {
     "Inbox": "UNKNOWN",
     "Growth": "UNKNOWN",
     "Lead": "UNKNOWN",
     "Content": "UNKNOWN",
-    "Browser Worker": "HEALTHY"
+    "Browser Worker": "UNKNOWN"
   },
   "biggest_bottleneck": "POSITIVE_REPLIES",
   "priority_1": {
