@@ -6,8 +6,10 @@ on:
     paths:
       - 'wake_linkedin_department.txt'
       - 'tasks/linkedin_department_head.json'
+      - 'tasks/linkedin_engagement_agent.json'
       - 'agent/linkedin_department_head.py'
       - 'agent/linkedin_execution_enforcer.py'
+      - 'agent/linkedin_department_control.py'
   schedule:
     - cron: '20 6-18 * * *'
 
@@ -60,16 +62,20 @@ jobs:
         if: steps.gate.outputs.run_review == 'true'
         run: python -m agent.linkedin_execution_enforcer
 
+      - name: Verify target actual gap action control
+        if: steps.gate.outputs.run_review == 'true'
+        run: python -m agent.linkedin_department_control
+
       - name: Commit department report
         if: steps.gate.outputs.run_review == 'true'
         run: |
           git config user.name 'locenix-linkedin-department-head'
           git config user.email 'actions@users.noreply.github.com'
-          git add results/linkedin_department_latest.json results/linkedin_department_state.json results/linkedin_execution_state.json
+          git add results/linkedin_department_latest.json results/linkedin_department_state.json results/linkedin_execution_state.json results/linkedin_control_state.json results/linkedin_control_latest.json
           if git diff --cached --quiet; then
             echo 'No department report changes'
           else
-            git commit -m 'Update LinkedIn department management and execution report'
+            git commit -m 'Update LinkedIn department management, execution and control report'
             git pull --rebase
             git push
           fi
