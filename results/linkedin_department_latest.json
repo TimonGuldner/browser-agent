@@ -1,7 +1,7 @@
 {
   "agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "last_run_at": "2026-09-12T19:05:36.890190+00:00",
+  "last_run_at": "2026-09-12T19:06:11.222702+00:00",
   "department_status": "ATTENTION",
   "department_health": "ATTENTION",
   "leads": 61,
@@ -68,13 +68,19 @@
   "ceo_message": "No CEO intervention required from currently observed evidence.",
   "guardrails": {
     "unknown_is_never_zero": true,
+    "target_actual_gap_action_remeasure": true,
+    "one_operational_owner_per_person": true,
     "existing_conversations_before_new_contacts": true,
     "positive_replies_before_followups": true,
     "followups_before_new_research": true,
+    "engagement_and_outreach_are_separate": true,
+    "content_and_engagement_are_separate": true,
     "system_safety_before_growth": true,
     "quality_over_activity": true,
     "do_not_contact_must_be_respected": true,
     "no_fabricated_external_actions": true,
+    "no_mass_dm_or_mass_comments": true,
+    "no_security_bypass": true,
     "new_agents_start_proposed": true,
     "human_approval_for_external_strategy_costs_and_activation": true
   }
