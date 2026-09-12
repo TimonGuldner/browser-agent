@@ -1,7 +1,7 @@
 {
-  "last_run_at": "2026-09-12T11:24:33.565438+00:00",
-  "department_status": "BLOCKED",
-  "department_health": "BLOCKED",
+  "last_run_at": "2026-09-12T11:56:17.447703+00:00",
+  "department_status": "ATTENTION",
+  "department_health": "ATTENTION",
   "leads": 61,
   "qualified_leads": 13,
   "active_conversations": 4,
@@ -16,7 +16,7 @@
   "queue_backlog": 8,
   "failed_jobs": 6,
   "queued_jobs": 0,
-  "account_risk": true,
+  "account_risk": false,
   "agent_health": {
     "Inbox": "UNKNOWN",
     "Growth": "UNKNOWN",
@@ -24,24 +24,24 @@
     "Content": "UNKNOWN",
     "Browser Worker": "HEALTHY"
   },
-  "biggest_bottleneck": "SYSTEM_SAFETY",
+  "biggest_bottleneck": "POSITIVE_REPLIES",
   "priority_1": {
-    "type": "SYSTEM_SAFETY",
-    "action": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
-    "owner": "Browser Worker"
-  },
-  "priority_2": {
     "type": "POSITIVE_REPLIES",
     "action": "Prioritize positive replies and active qualified conversations before new prospecting.",
     "owner": "Conversation / Inbox Agent"
   },
-  "priority_3": {
+  "priority_2": {
     "type": "ACTIVE_CONVERSATIONS",
     "action": "Work active conversations before generating additional outreach volume.",
     "owner": "Conversation Agent"
   },
+  "priority_3": {
+    "type": "QUALIFIED_LEADS",
+    "action": "Process existing qualified leads before increasing discovery volume.",
+    "owner": "Lead / Conversation Agent"
+  },
   "current_experiment": "UNKNOWN",
-  "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase; operational risk only uses recent active/failed jobs, not historical noise.",
+  "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase. Account risk now requires explicit positive security evidence; negated mentions do not trigger a block.",
   "directive_status": "RECEIVED",
   "received_ceo_directive": {
     "directive_id": "li-a678cdb9f1b8",
@@ -56,7 +56,7 @@
     "status": "QUEUED",
     "external_action_authorized": false
   },
-  "human_decision_required": true,
-  "ceo_escalation_required": true,
-  "ceo_message": "Pause risky LinkedIn actions and escalate the observed account/security signal."
+  "human_decision_required": false,
+  "ceo_escalation_required": false,
+  "ceo_message": "No CEO intervention required from currently observed evidence."
 }
