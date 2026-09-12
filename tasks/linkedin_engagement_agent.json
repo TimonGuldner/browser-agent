@@ -1,0 +1,44 @@
+{
+  "enabled": true,
+  "agent": "AGENT_8E_LINKEDIN_ENGAGEMENT",
+  "department": "linkedin",
+  "reports_to": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
+  "runtime_role": "growth",
+  "goal": "QUALIFIED_TO_ENGAGED",
+  "daily_target": 3,
+  "business_hours": {
+    "timezone": "Europe/Berlin",
+    "start_hour": 8,
+    "end_hour": 20
+  },
+  "allowed_actions": [
+    "inspect_relevant_posts",
+    "create_natural_comments",
+    "like_when_contextually_useful",
+    "update_airtable_after_confirmed_action"
+  ],
+  "forbidden_actions": [
+    "direct_messages",
+    "sales_pitch_comments",
+    "links_in_comments",
+    "mass_comments",
+    "fabricated_claims",
+    "security_bypass"
+  ],
+  "rules": {
+    "qualified_or_relevant_people_only": true,
+    "do_not_contact_must_be_respected": true,
+    "one_to_three_sentences": true,
+    "no_generic_praise": true,
+    "no_company_name_pitch": true,
+    "no_gendering": true,
+    "quality_before_quota": true,
+    "only_log_confirmed_external_actions": true,
+    "single_owner_per_person": true
+  },
+  "handoff": {
+    "input_stage": ["QUALIFIED", "ENGAGE"],
+    "output_stage": "ENGAGED",
+    "next_owner": "OUTREACH_GROWTH"
+  }
+}
