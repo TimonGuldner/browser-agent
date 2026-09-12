@@ -2,7 +2,7 @@
   "control": {
     "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
     "reports_to": "AGENT_0_LOCENIX_CEO",
-    "generated_at": "2026-09-12T19:07:16.680352+00:00",
+    "generated_at": "2026-09-12T19:09:23.977125+00:00",
     "control_status": "OUTSIDE_BUSINESS_HOURS",
     "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
     "targets": {
@@ -27,7 +27,7 @@
     "management_rule": "TARGET -> ACTUAL -> GAP -> ACTION -> RE-MEASURE. A healthy workflow is not sufficient evidence; funnel movement and executed work are required."
   },
   "department": {
-    "last_run_at": "2026-09-12T19:07:16.537651+00:00",
+    "last_run_at": "2026-09-12T19:09:23.829841+00:00",
     "department_status": "ATTENTION",
     "department_health": "ATTENTION",
     "leads": 61,
@@ -80,7 +80,7 @@
       "priority": 1,
       "success_metric": "Agent 8 reports the bottleneck reduced or resolved using observed Airtable/Supabase evidence.",
       "created_at": "2026-09-12T12:08:42.961312+00:00",
-      "updated_at": "2026-09-12T18:33:46.736546+00:00",
+      "updated_at": "2026-09-12T19:07:56.021669+00:00",
       "status": "QUEUED",
       "external_action_authorized": false
     },
@@ -90,7 +90,7 @@
   },
   "execution": {
     "status": "outside_business_hours",
-    "checked_at": "2026-09-12T21:07:16.630109+02:00",
+    "checked_at": "2026-09-12T21:09:23.929784+02:00",
     "daily_targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
