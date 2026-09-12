@@ -1,7 +1,7 @@
 {
   "agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "last_run_at": "2026-09-12T11:56:17.447703+00:00",
+  "last_run_at": "2026-09-12T18:12:59.654762+00:00",
   "department_status": "ATTENTION",
   "department_health": "ATTENTION",
   "leads": 61,
@@ -16,7 +16,7 @@
   "trials": 0,
   "paid_customers": 0,
   "queue_backlog": 8,
-  "failed_jobs": 6,
+  "failed_jobs": 4,
   "queued_jobs": 0,
   "account_risk": false,
   "agent_health": {
@@ -50,15 +50,15 @@
   "current_experiment": "UNKNOWN",
   "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase. Account risk now requires explicit positive security evidence; negated mentions do not trigger a block.",
   "received_ceo_directive": {
-    "directive_id": "li-a678cdb9f1b8",
+    "directive_id": "li-dd8dd1f15049",
     "department": "linkedin",
     "owner_agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
-    "objective": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
-    "reason": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
+    "objective": "Prioritize positive replies and active qualified conversations before new prospecting.",
+    "reason": "LinkedIn department priority: POSITIVE_REPLIES",
     "priority": 1,
     "success_metric": "Agent 8 reports the bottleneck reduced or resolved using observed Airtable/Supabase evidence.",
-    "created_at": "2026-09-12T11:23:34.939335+00:00",
-    "updated_at": "2026-09-12T11:23:34.939335+00:00",
+    "created_at": "2026-09-12T12:08:42.961312+00:00",
+    "updated_at": "2026-09-12T17:14:03.829880+00:00",
     "status": "QUEUED",
     "external_action_authorized": false
   },
