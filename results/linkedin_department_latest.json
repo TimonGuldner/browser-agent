@@ -1,9 +1,9 @@
 {
   "agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "last_run_at": "2026-09-12T11:08:48.555668+00:00",
-  "department_status": "ATTENTION",
-  "department_health": "ATTENTION",
+  "last_run_at": "2026-09-12T11:20:49.703967+00:00",
+  "department_status": "HEALTHY",
+  "department_health": "HEALTHY",
   "leads": "UNKNOWN",
   "qualified_leads": "UNKNOWN",
   "active_conversations": "UNKNOWN",
@@ -15,21 +15,37 @@
   "visibility_checks_accepted": "UNKNOWN",
   "trials": "UNKNOWN",
   "paid_customers": "UNKNOWN",
-  "system_health": "NO_OBSERVED_BLOCKER",
-  "biggest_bottleneck": "EVIDENCE",
+  "queue_backlog": 0,
+  "failed_jobs": "UNKNOWN",
+  "queued_jobs": "UNKNOWN",
+  "account_risk": "UNKNOWN",
+  "agent_health": {
+    "Inbox": "UNKNOWN",
+    "Growth": "UNKNOWN",
+    "Lead": "UNKNOWN",
+    "Content": "UNKNOWN",
+    "Browser Worker": "UNKNOWN"
+  },
+  "source_health": {
+    "airtable": "UNKNOWN",
+    "supabase": "UNKNOWN"
+  },
+  "risk_job_ids": [],
+  "biggest_bottleneck": "GROWTH",
   "priority_1": {
-    "type": "EVIDENCE",
-    "action": "Collect current LinkedIn funnel evidence; do not manufacture activity while core metrics are unavailable.",
-    "owner": "LinkedIn Department"
+    "type": "GROWTH",
+    "action": "No observed downstream bottleneck; keep conservative qualified lead generation active.",
+    "owner": "Lead Agent"
   },
   "priority_2": null,
   "priority_3": null,
-  "main_learning": "UNKNOWN",
-  "risks": [],
-  "proposed_agents": [],
+  "current_experiment": "UNKNOWN",
+  "main_learning": "Operational LinkedIn metrics are now read directly from Airtable and Supabase; missing fields remain UNKNOWN.",
+  "received_ceo_directive": null,
+  "directive_status": "NONE",
   "human_decision_required": false,
   "ceo_escalation_required": false,
-  "ceo_message": "No CEO intervention required from currently observed repository evidence.",
+  "ceo_message": "No CEO intervention required from currently observed evidence.",
   "guardrails": {
     "unknown_is_never_zero": true,
     "existing_conversations_before_new_contacts": true,
@@ -41,6 +57,5 @@
     "no_fabricated_external_actions": true,
     "new_agents_start_proposed": true,
     "human_approval_for_external_strategy_costs_and_activation": true
-  },
-  "evidence_files_seen": []
+  }
 }
