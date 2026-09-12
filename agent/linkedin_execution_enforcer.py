@@ -13,8 +13,7 @@ SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 AIRTABLE_PAT = os.environ['AIRTABLE_PAT']
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', 'appN6ox7fjGFyXZhL')
 RUN_REPORTS = 'tblntmY8DXjSJWq8t'
-GROWTH_METRICS = 'tblL6eYnihy7hWocv'
-PEOPLE = 'tbloK0jz2X6ffr0D2'
+CONTENT_OPPORTUNITIES = 'tblbDiGu7EeQxnbx2'
 STATE = Path('results/linkedin_execution_state.json')
 
 DAILY_TARGETS = {
@@ -32,13 +31,15 @@ STRICT SCOPE:
 - Work only on relevant qualified people or high-priority Content Opportunities tied to the target audience.
 - Before any external action, check Airtable People for duplicates, Do Not Contact, current Contact Status, Owner Agent and recent interactions.
 - Do not act on a person owned by another operational agent. If Owner Agent is empty and the person is suitable for engagement, set Owner Agent to AGENT_8E_LINKEDIN_ENGAGEMENT before acting.
+- Use a Content Opportunity as the auditable unit of work. If a suitable post is discovered outside an existing opportunity, create/update the Content Opportunity before acting so the post URL and context are traceable.
 - Find a genuinely relevant recent post. If there is no suitable post, do nothing and record the reason. Quality beats quota.
 - A comment must be 1-3 natural German sentences, specific to the post, helpful, and sound like Timon personally.
 - Never use generic praise, sales pitches, links, LOCENIX promotion, company-name dropping, gendering, fake claims or repetitive templates.
 - Likes are allowed only when contextually useful; never manufacture activity.
 - Never send DMs or connection requests. Those belong to Outreach/Growth.
 - Never bypass CAPTCHA, 2FA, checkpoints, rate limits or warnings.
-- After a technically confirmed comment/reaction, update Airtable: log the Interaction, mark the Content Opportunity appropriately when applicable, set Last Interaction, increment or set Engagement Score based on observed engagement, and set Next Step toward CONNECTION_READY when appropriate.
+- After a technically confirmed comment, update the Content Opportunity Commented Date to today and Result with the observed outcome; also log the Interaction, set Last Interaction, update Engagement Score from observed evidence, and set Next Step toward CONNECTION_READY when appropriate.
+- Do not mark Commented Date unless the comment was technically confirmed on LinkedIn. Agent 8 measures daily engagement from these confirmed records.
 - Once engagement work for a person is complete, release Owner Agent or hand it to OUTREACH_GROWTH via Next Step; do not leave stale ownership.
 - Only count actions that actually happened on LinkedIn.
 '''
@@ -92,11 +93,10 @@ def airtable_today() -> dict[str, int]:
         totals['positive_replies'] += int(f.get('Positive Replies') or 0)
         totals['active_conversations'] = max(totals['active_conversations'], int(f.get('Active Conversations') or 0))
 
-    metric_formula = urllib.parse.quote(f"IS_SAME({{Date}}, '{today}', 'day')")
-    metric_url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{GROWTH_METRICS}?pageSize=100&filterByFormula={metric_formula}'
-    metric_data = get_json(metric_url, airtable_headers())
-    for rec in (metric_data or {}).get('records', []):
-        totals['engagement_actions'] += int((rec.get('fields') or {}).get('Comments Made') or 0)
+    comment_formula = urllib.parse.quote(f"IS_SAME({{Commented Date}}, '{today}', 'day')")
+    comment_url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{CONTENT_OPPORTUNITIES}?pageSize=100&filterByFormula={comment_formula}'
+    comment_data = get_json(comment_url, airtable_headers())
+    totals['engagement_actions'] = len((comment_data or {}).get('records', []))
     return totals
 
 
@@ -192,7 +192,6 @@ def main() -> None:
     active = active_department_roles(jobs)
     created: list[dict[str, str]] = []
 
-    # 1) Existing conversations/replies always outrank new acquisition activity.
     if (
         metrics['positive_replies'] > 0
         or metrics['active_conversations'] > 0
@@ -201,7 +200,6 @@ def main() -> None:
         created.append({'role': 'inbox', 'job_id': enqueue('inbox', department_role='inbox', priority_boost=30)})
         active.add('inbox')
 
-    # 2) Keep the top of the funnel supplied with qualified leads.
     if metrics['qualified_leads_found'] < DAILY_TARGETS['qualified_leads_found'] and 'lead' not in active:
         remaining = max(1, DAILY_TARGETS['qualified_leads_found'] - metrics['qualified_leads_found'])
         created.append({
@@ -210,8 +208,6 @@ def main() -> None:
         })
         active.add('lead')
 
-    # 3) Dedicated relationship-warming/comment agent. It uses the proven Growth runtime
-    # adapter but has its own department role and hard scope; it never sends DMs/connections.
     if metrics['engagement_actions'] < DAILY_TARGETS['engagement_actions'] and 'engagement' not in active:
         remaining = max(1, DAILY_TARGETS['engagement_actions'] - metrics['engagement_actions'])
         created.append({
@@ -226,12 +222,15 @@ def main() -> None:
         })
         active.add('engagement')
 
-    # 4) Outreach/connection work is separate from engagement and starts only when its
-    # own daily outcome is below target. Existing Growth prompt/CRM safety rules remain binding.
     if metrics['connection_requests'] < DAILY_TARGETS['connection_requests'] and 'outreach' not in active:
         created.append({
             'role': 'outreach',
-            'job_id': enqueue('growth', department_role='outreach', target=DAILY_TARGETS['connection_requests'] - metrics['connection_requests'], priority_boost=5),
+            'job_id': enqueue(
+                'growth',
+                department_role='outreach',
+                target=DAILY_TARGETS['connection_requests'] - metrics['connection_requests'],
+                priority_boost=5,
+            ),
         })
         active.add('outreach')
 
