@@ -1,5 +1,5 @@
 {
-  "last_run_at": "2026-09-12T11:24:00.065872+00:00",
+  "last_run_at": "2026-09-12T11:24:33.565438+00:00",
   "department_status": "BLOCKED",
   "department_health": "BLOCKED",
   "leads": 61,
@@ -42,8 +42,20 @@
   },
   "current_experiment": "UNKNOWN",
   "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase; operational risk only uses recent active/failed jobs, not historical noise.",
-  "directive_status": "NONE",
-  "received_ceo_directive": null,
+  "directive_status": "RECEIVED",
+  "received_ceo_directive": {
+    "directive_id": "li-a678cdb9f1b8",
+    "department": "linkedin",
+    "owner_agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
+    "objective": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
+    "reason": "Pause risky LinkedIn actions and escalate the observed account/security signal.",
+    "priority": 1,
+    "success_metric": "Agent 8 reports the bottleneck reduced or resolved using observed Airtable/Supabase evidence.",
+    "created_at": "2026-09-12T11:23:34.939335+00:00",
+    "updated_at": "2026-09-12T11:23:34.939335+00:00",
+    "status": "QUEUED",
+    "external_action_authorized": false
+  },
   "human_decision_required": true,
   "ceo_escalation_required": true,
   "ceo_message": "Pause risky LinkedIn actions and escalate the observed account/security signal."
