@@ -1,7 +1,7 @@
 {
   "agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "last_run_at": "2026-09-12T11:22:05.653728+00:00",
+  "last_run_at": "2026-09-12T11:23:06.450633+00:00",
   "department_status": "BLOCKED",
   "department_health": "BLOCKED",
   "leads": 61,
@@ -16,7 +16,7 @@
   "trials": 0,
   "paid_customers": 0,
   "queue_backlog": 8,
-  "failed_jobs": 61,
+  "failed_jobs": 6,
   "queued_jobs": 0,
   "account_risk": true,
   "agent_health": {
@@ -31,11 +31,7 @@
     "supabase": "AVAILABLE"
   },
   "risk_job_ids": [
-    "cf6eedfa-6cd7-442c-8c71-290ed415b37a",
-    "f12928c4-b6e7-450b-a541-2e751dd124aa",
-    "9c7dece3-b3e8-4ff3-86b6-249db79f1764",
-    "2373d380-f21f-4fd2-bb00-265b1fd5da75",
-    "2e516820-ab7b-4678-a7d8-eb718c2eacc8"
+    "cf6eedfa-6cd7-442c-8c71-290ed415b37a"
   ],
   "biggest_bottleneck": "SYSTEM_SAFETY",
   "priority_1": {
@@ -54,7 +50,7 @@
     "owner": "Conversation Agent"
   },
   "current_experiment": "UNKNOWN",
-  "main_learning": "Operational LinkedIn metrics are now read directly from Airtable and Supabase; missing fields remain UNKNOWN.",
+  "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase; operational risk only uses recent active/failed jobs, not historical noise.",
   "received_ceo_directive": null,
   "directive_status": "NONE",
   "human_decision_required": true,

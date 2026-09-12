@@ -1,5 +1,5 @@
 {
-  "last_run_at": "2026-09-12T11:22:05.653728+00:00",
+  "last_run_at": "2026-09-12T11:23:06.450633+00:00",
   "department_status": "BLOCKED",
   "department_health": "BLOCKED",
   "leads": 61,
@@ -14,7 +14,7 @@
   "trials": 0,
   "paid_customers": 0,
   "queue_backlog": 8,
-  "failed_jobs": 61,
+  "failed_jobs": 6,
   "queued_jobs": 0,
   "account_risk": true,
   "agent_health": {
@@ -41,7 +41,7 @@
     "owner": "Conversation Agent"
   },
   "current_experiment": "UNKNOWN",
-  "main_learning": "Operational LinkedIn metrics are now read directly from Airtable and Supabase; missing fields remain UNKNOWN.",
+  "main_learning": "Operational LinkedIn metrics are read directly from Airtable and Supabase; operational risk only uses recent active/failed jobs, not historical noise.",
   "directive_status": "NONE",
   "received_ceo_directive": null,
   "human_decision_required": true,
