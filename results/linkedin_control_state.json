@@ -1,0 +1,27 @@
+{
+  "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
+  "reports_to": "AGENT_0_LOCENIX_CEO",
+  "generated_at": "2026-09-12T19:07:16.680352+00:00",
+  "control_status": "OUTSIDE_BUSINESS_HOURS",
+  "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
+  "targets": {
+    "qualified_leads_found": 10,
+    "engagement_actions": 3,
+    "connection_requests": 5
+  },
+  "actual": {},
+  "gaps": {},
+  "created_jobs": [],
+  "active_roles": [],
+  "department_status": "ATTENTION",
+  "biggest_bottleneck": "POSITIVE_REPLIES",
+  "priority_1": {
+    "type": "POSITIVE_REPLIES",
+    "action": "Prioritize positive replies and active qualified conversations before new prospecting.",
+    "owner": "Conversation / Inbox Agent"
+  },
+  "funnel_order": [],
+  "ceo_attention_required": false,
+  "corrective_action": "No new external LinkedIn work is started outside the configured business-hours window.",
+  "management_rule": "TARGET -> ACTUAL -> GAP -> ACTION -> RE-MEASURE. A healthy workflow is not sufficient evidence; funnel movement and executed work are required."
+}
