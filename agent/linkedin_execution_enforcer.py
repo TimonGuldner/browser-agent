@@ -13,12 +13,35 @@ SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 AIRTABLE_PAT = os.environ['AIRTABLE_PAT']
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', 'appN6ox7fjGFyXZhL')
 RUN_REPORTS = 'tblntmY8DXjSJWq8t'
+GROWTH_METRICS = 'tblL6eYnihy7hWocv'
+PEOPLE = 'tbloK0jz2X6ffr0D2'
 STATE = Path('results/linkedin_execution_state.json')
 
 DAILY_TARGETS = {
     'qualified_leads_found': 10,
+    'engagement_actions': 3,
     'connection_requests': 5,
 }
+
+ENGAGEMENT_PROMPT = r'''
+
+DEDICATED ROLE: LINKEDIN ENGAGEMENT / COMMENT AGENT
+You report to Agent 8, the LinkedIn Department Head. Your only purpose is to move suitable people from QUALIFIED/ENGAGE to ENGAGED through authentic relationship-building on LinkedIn.
+
+STRICT SCOPE:
+- Work only on relevant qualified people or high-priority Content Opportunities tied to the target audience.
+- Before any external action, check Airtable People for duplicates, Do Not Contact, current Contact Status, Owner Agent and recent interactions.
+- Do not act on a person owned by another operational agent. If Owner Agent is empty and the person is suitable for engagement, set Owner Agent to AGENT_8E_LINKEDIN_ENGAGEMENT before acting.
+- Find a genuinely relevant recent post. If there is no suitable post, do nothing and record the reason. Quality beats quota.
+- A comment must be 1-3 natural German sentences, specific to the post, helpful, and sound like Timon personally.
+- Never use generic praise, sales pitches, links, LOCENIX promotion, company-name dropping, gendering, fake claims or repetitive templates.
+- Likes are allowed only when contextually useful; never manufacture activity.
+- Never send DMs or connection requests. Those belong to Outreach/Growth.
+- Never bypass CAPTCHA, 2FA, checkpoints, rate limits or warnings.
+- After a technically confirmed comment/reaction, update Airtable: log the Interaction, mark the Content Opportunity appropriately when applicable, set Last Interaction, increment or set Engagement Score based on observed engagement, and set Next Step toward CONNECTION_READY when appropriate.
+- Once engagement work for a person is complete, release Owner Agent or hand it to OUTREACH_GROWTH via Next Step; do not leave stale ownership.
+- Only count actions that actually happened on LinkedIn.
+'''
 
 
 def save(obj: dict) -> None:
@@ -33,18 +56,34 @@ def get_json(url: str, headers: dict[str, str]) -> object:
 
 
 def post_json(url: str, payload: dict, headers: dict[str, str]) -> object:
-    req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), method='POST', headers={**headers, 'Content-Type': 'application/json'})
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode('utf-8'),
+        method='POST',
+        headers={**headers, 'Content-Type': 'application/json'},
+    )
     with urllib.request.urlopen(req, timeout=30) as r:
         body = r.read().decode('utf-8')
         return json.loads(body) if body else {}
+
+
+def airtable_headers() -> dict[str, str]:
+    return {'Authorization': f'Bearer {AIRTABLE_PAT}'}
 
 
 def airtable_today() -> dict[str, int]:
     today = datetime.now(ZoneInfo('Europe/Berlin')).date().isoformat()
     formula = urllib.parse.quote(f"IS_SAME({{Run Time}}, '{today}', 'day')")
     url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{RUN_REPORTS}?pageSize=100&filterByFormula={formula}'
-    data = get_json(url, {'Authorization': f'Bearer {AIRTABLE_PAT}'})
-    totals = {'qualified_leads_found': 0, 'connection_requests': 0, 'replies_received': 0, 'positive_replies': 0, 'active_conversations': 0}
+    data = get_json(url, airtable_headers())
+    totals = {
+        'qualified_leads_found': 0,
+        'engagement_actions': 0,
+        'connection_requests': 0,
+        'replies_received': 0,
+        'positive_replies': 0,
+        'active_conversations': 0,
+    }
     for rec in (data or {}).get('records', []):
         f = rec.get('fields', {})
         totals['qualified_leads_found'] += int(f.get('Qualified Leads Found') or 0)
@@ -52,6 +91,12 @@ def airtable_today() -> dict[str, int]:
         totals['replies_received'] += int(f.get('Replies Received') or 0)
         totals['positive_replies'] += int(f.get('Positive Replies') or 0)
         totals['active_conversations'] = max(totals['active_conversations'], int(f.get('Active Conversations') or 0))
+
+    metric_formula = urllib.parse.quote(f"IS_SAME({{Date}}, '{today}', 'day')")
+    metric_url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{GROWTH_METRICS}?pageSize=100&filterByFormula={metric_formula}'
+    metric_data = get_json(metric_url, airtable_headers())
+    for rec in (metric_data or {}).get('records', []):
+        totals['engagement_actions'] += int((rec.get('fields') or {}).get('Comments Made') or 0)
     return totals
 
 
@@ -59,14 +104,22 @@ def supabase_headers() -> dict[str, str]:
     return {'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
 
 
-def existing_active_roles() -> set[str]:
-    query = urllib.parse.urlencode({'status': 'in.(queued,running)', 'select': 'input,status', 'limit': '100'})
+def existing_active_jobs() -> list[dict]:
+    query = urllib.parse.urlencode({'status': 'in.(queued,running)', 'select': 'id,input,status', 'limit': '100'})
     rows = get_json(f'{SUPABASE_URL}/rest/v1/agent_jobs?{query}', supabase_headers())
+    return rows if isinstance(rows, list) else []
+
+
+def active_department_roles(jobs: list[dict]) -> set[str]:
     out = set()
-    for row in rows if isinstance(rows, list) else []:
-        role = str((row.get('input') or {}).get('agent_role') or '').lower()
-        if role:
-            out.add(role)
+    for row in jobs:
+        inp = row.get('input') or {}
+        department_role = str(inp.get('department_role') or '').strip().lower()
+        runtime_role = str(inp.get('agent_role') or '').strip().lower()
+        if department_role:
+            out.add(department_role)
+        elif runtime_role:
+            out.add(runtime_role)
     return out
 
 
@@ -80,13 +133,26 @@ def template(role: str) -> tuple[str, int, int]:
     return task, int(row.get('max_steps') or 30), int(row.get('priority') or 100)
 
 
-def enqueue(role: str, *, phase: str | None = None, target: int | None = None, priority_boost: int = 0) -> str:
+def enqueue(
+    role: str,
+    *,
+    department_role: str | None = None,
+    phase: str | None = None,
+    target: int | None = None,
+    priority_boost: int = 0,
+    task_suffix: str = '',
+) -> str:
     task, max_steps, priority = template(role)
+    if task_suffix:
+        task = task + task_suffix
     inp = {'agent_role': role, 'scheduled': False, 'source': 'agent8-execution-enforcer'}
+    if department_role:
+        inp['department_role'] = department_role
     if phase:
         inp['pipeline_phase'] = phase
     if target is not None:
         inp['target_new_profiles'] = target
+        inp['target_actions'] = target
     payload = {
         'status': 'queued',
         'task': task,
@@ -95,45 +161,94 @@ def enqueue(role: str, *, phase: str | None = None, target: int | None = None, p
         'max_steps': max_steps,
         'input': inp,
     }
-    rows = post_json(f'{SUPABASE_URL}/rest/v1/agent_jobs', payload, {**supabase_headers(), 'Prefer': 'return=representation'})
+    rows = post_json(
+        f'{SUPABASE_URL}/rest/v1/agent_jobs',
+        payload,
+        {**supabase_headers(), 'Prefer': 'return=representation'},
+    )
     if not isinstance(rows, list) or not rows:
-        raise RuntimeError(f'Could not enqueue {role}')
+        raise RuntimeError(f'Could not enqueue {department_role or role}')
     return str(rows[0]['id'])
+
+
+def gaps(metrics: dict[str, int]) -> dict[str, int]:
+    return {key: max(0, int(target) - int(metrics.get(key) or 0)) for key, target in DAILY_TARGETS.items()}
 
 
 def main() -> None:
     now = datetime.now(ZoneInfo('Europe/Berlin'))
     if not (8 <= now.hour < 20):
-        result = {'status': 'outside_business_hours', 'checked_at': now.isoformat(), 'daily_targets': DAILY_TARGETS}
+        result = {
+            'status': 'outside_business_hours',
+            'checked_at': now.isoformat(),
+            'daily_targets': DAILY_TARGETS,
+        }
         save(result)
         print(json.dumps(result, ensure_ascii=False))
         return
 
     metrics = airtable_today()
-    active = existing_active_roles()
+    jobs = existing_active_jobs()
+    active = active_department_roles(jobs)
     created: list[dict[str, str]] = []
 
-    if (metrics['positive_replies'] > 0 or metrics['active_conversations'] > 0 or metrics['replies_received'] > 0) and 'inbox' not in active:
-        created.append({'role': 'inbox', 'job_id': enqueue('inbox', priority_boost=30)})
+    # 1) Existing conversations/replies always outrank new acquisition activity.
+    if (
+        metrics['positive_replies'] > 0
+        or metrics['active_conversations'] > 0
+        or metrics['replies_received'] > 0
+    ) and 'inbox' not in active:
+        created.append({'role': 'inbox', 'job_id': enqueue('inbox', department_role='inbox', priority_boost=30)})
         active.add('inbox')
 
+    # 2) Keep the top of the funnel supplied with qualified leads.
     if metrics['qualified_leads_found'] < DAILY_TARGETS['qualified_leads_found'] and 'lead' not in active:
         remaining = max(1, DAILY_TARGETS['qualified_leads_found'] - metrics['qualified_leads_found'])
-        created.append({'role': 'lead', 'job_id': enqueue('lead', phase='research_v3', target=min(10, remaining), priority_boost=10)})
+        created.append({
+            'role': 'lead',
+            'job_id': enqueue('lead', department_role='lead', phase='research_v3', target=min(10, remaining), priority_boost=10),
+        })
         active.add('lead')
 
-    if metrics['connection_requests'] < DAILY_TARGETS['connection_requests'] and 'growth' not in active:
-        created.append({'role': 'growth', 'job_id': enqueue('growth', priority_boost=5)})
-        active.add('growth')
+    # 3) Dedicated relationship-warming/comment agent. It uses the proven Growth runtime
+    # adapter but has its own department role and hard scope; it never sends DMs/connections.
+    if metrics['engagement_actions'] < DAILY_TARGETS['engagement_actions'] and 'engagement' not in active:
+        remaining = max(1, DAILY_TARGETS['engagement_actions'] - metrics['engagement_actions'])
+        created.append({
+            'role': 'engagement',
+            'job_id': enqueue(
+                'growth',
+                department_role='engagement',
+                target=min(3, remaining),
+                priority_boost=8,
+                task_suffix=ENGAGEMENT_PROMPT,
+            ),
+        })
+        active.add('engagement')
+
+    # 4) Outreach/connection work is separate from engagement and starts only when its
+    # own daily outcome is below target. Existing Growth prompt/CRM safety rules remain binding.
+    if metrics['connection_requests'] < DAILY_TARGETS['connection_requests'] and 'outreach' not in active:
+        created.append({
+            'role': 'outreach',
+            'job_id': enqueue('growth', department_role='outreach', target=DAILY_TARGETS['connection_requests'] - metrics['connection_requests'], priority_boost=5),
+        })
+        active.add('outreach')
 
     result = {
         'status': 'ok',
         'checked_at': now.isoformat(),
         'daily_metrics': metrics,
         'daily_targets': DAILY_TARGETS,
+        'gaps': gaps(metrics),
         'created_jobs': created,
         'active_roles_after_check': sorted(active),
-        'rule': 'Agent 8 must create executable work when daily outcomes are below target, while existing CRM/safety guardrails remain binding.',
+        'funnel_order': [
+            'DISCOVERED', 'QUALIFIED', 'ENGAGE', 'ENGAGED', 'CONNECTION_READY',
+            'CONNECTION_SENT', 'CONNECTED', 'CONVERSATION_STARTED', 'INTERESTED',
+            'CHECK_OFFERED', 'CHECK_ACCEPTED', 'TRIAL', 'PAID',
+        ],
+        'rule': 'Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding.',
     }
     save(result)
     print(json.dumps(result, ensure_ascii=False))
