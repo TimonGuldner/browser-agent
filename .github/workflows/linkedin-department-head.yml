@@ -21,30 +21,42 @@ jobs:
   management-review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Berlin management-review gate
-        if: github.event_name == 'schedule'
+      - name: Resolve Berlin management-review slot
+        id: gate
+        shell: bash
         run: |
-          python - <<'PY'
+          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+            echo "run_review=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python - <<'PY' >> "$GITHUB_OUTPUT"
           from datetime import datetime
           from zoneinfo import ZoneInfo
           now = datetime.now(ZoneInfo('Europe/Berlin'))
-          if not (now.minute == 20 and now.hour in (8, 16)):
-              raise SystemExit('Not a LinkedIn management review slot')
+          print('run_review=' + ('true' if now.minute == 20 and now.hour in (8, 16) else 'false'))
           PY
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run_review == 'true'
         with:
           python-version: '3.12'
 
       - name: Run LinkedIn Department Head Agent 8
+        if: steps.gate.outputs.run_review == 'true'
         run: python -m agent.linkedin_department_head
 
       - name: Commit department report
+        if: steps.gate.outputs.run_review == 'true'
         run: |
           git config user.name 'locenix-linkedin-department-head'
           git config user.email 'actions@users.noreply.github.com'
