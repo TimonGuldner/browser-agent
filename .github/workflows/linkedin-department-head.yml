@@ -7,8 +7,9 @@ on:
       - 'wake_linkedin_department.txt'
       - 'tasks/linkedin_department_head.json'
       - 'agent/linkedin_department_head.py'
+      - 'agent/linkedin_execution_enforcer.py'
   schedule:
-    - cron: '20 6,7,14,15 * * *'
+    - cron: '20 6-18 * * *'
 
 permissions:
   contents: write
@@ -43,7 +44,7 @@ jobs:
           from datetime import datetime
           from zoneinfo import ZoneInfo
           now = datetime.now(ZoneInfo('Europe/Berlin'))
-          print('run_review=' + ('true' if now.minute == 20 and now.hour in (8, 16) else 'false'))
+          print('run_review=' + ('true' if now.minute == 20 and 8 <= now.hour < 20 else 'false'))
           PY
 
       - uses: actions/setup-python@v5
@@ -54,6 +55,10 @@ jobs:
       - name: Run LinkedIn Department Head Agent 8
         if: steps.gate.outputs.run_review == 'true'
         run: python -m agent.linkedin_department_head
+
+      - name: Enforce department execution targets
+        if: steps.gate.outputs.run_review == 'true'
+        run: python -m agent.linkedin_execution_enforcer
 
       - name: Commit department report
         if: steps.gate.outputs.run_review == 'true'
