@@ -4,4 +4,4 @@ Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
 Late-day corrective enforcement remains active until 23:00 Europe/Berlin while gaps remain.
 Email quota sender and optional Browser Use/Google/Anthropic provider fallback are wired.
-Wake: 2026-09-13 final audit — verify current production code end to end.
+Wake: 2026-09-13 20:34 Europe/Berlin — test newly configured GOOGLE_API_KEY / Gemini provider and execute remaining LinkedIn KPI gaps.
