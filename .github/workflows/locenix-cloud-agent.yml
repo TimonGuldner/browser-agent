@@ -25,7 +25,11 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
+      AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      BROWSER_USE_API_KEY: ${{ secrets.BROWSER_USE_API_KEY }}
       OPENAI_MODEL: gpt-5.6-luna
       REPAIR_OPENAI_MODEL: gpt-5.6-luna
       MONTHLY_LLM_BUDGET_USD: "10"
@@ -50,8 +54,8 @@ jobs:
           if [[ -z "$AIRTABLE_PAT" ]]; then
             echo "Airtable is not connected. Scheduled CRM jobs fail closed."
           fi
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "OpenAI API is not connected. Zero-LLM supervisor/research can still work; AI jobs fail closed."
+          if [[ -z "$OPENAI_API_KEY" && -z "$GOOGLE_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$BROWSER_USE_API_KEY" ]]; then
+            echo "No LLM provider secret is configured. Deterministic paths still run; LLM-dependent LinkedIn work is externally blocked."
           fi
 
       - name: Checkout
@@ -71,10 +75,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Run LOCENIX deterministic supervisor
+      - name: Run Agent 0 CEO measurement and objective sync
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: python -m agent.ceo_supervisor
+
+      - name: Run deterministic technical supervisor
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: python -m agent.supervisor
+
+      - name: Enforce Agent 8 LinkedIn daily gaps
+        if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
+        shell: bash
+        run: python -m agent.linkedin_execution_enforcer_v3
 
       - name: Enqueue due Supabase schedules
         if: steps.config.outputs.ready == 'true'
@@ -134,6 +149,12 @@ jobs:
           for n in 1 2 3 4 5 6; do
             python -m agent.airtable_worker --once
           done
+
+      - name: Re-measure Agent 0 objectives after execution
+        if: always() && steps.config.outputs.ready == 'true'
+        continue-on-error: true
+        shell: bash
+        run: python -m agent.ceo_supervisor
 
       - name: Run LLM repair agent after operational queue
         if: always() && steps.config.outputs.ready == 'true' && env.OPENAI_API_KEY != ''
