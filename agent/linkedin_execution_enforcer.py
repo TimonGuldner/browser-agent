@@ -14,6 +14,7 @@ AIRTABLE_PAT = os.environ['AIRTABLE_PAT']
 AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', 'appN6ox7fjGFyXZhL')
 RUN_REPORTS = 'tblntmY8DXjSJWq8t'
 CONTENT_OPPORTUNITIES = 'tblbDiGu7EeQxnbx2'
+INTERACTIONS = 'tbltGdYCuYsEZEghp'
 STATE = Path('results/linkedin_execution_state.json')
 LEARNING_CONFIG = Path('results/linkedin_learning_config.json')
 
@@ -21,6 +22,7 @@ DAILY_TARGETS = {
     'qualified_leads_found': 10,
     'engagement_actions': 3,
     'connection_requests': 5,
+    'direct_messages': 3,
 }
 
 ENGAGEMENT_PROMPT = r'''
@@ -43,6 +45,24 @@ STRICT SCOPE:
 - Do not mark Commented Date unless the comment was technically confirmed on LinkedIn. Agent 8 measures daily engagement from these confirmed records.
 - Once engagement work for a person is complete, release Owner Agent or hand it to OUTREACH_GROWTH via Next Step; do not leave stale ownership.
 - Only count actions that actually happened on LinkedIn.
+'''
+
+DM_PROMPT = r'''
+
+DEDICATED ROLE: LINKEDIN INDIVIDUAL DM OUTREACH
+You report to Agent 8. Close the observed daily direct-message gap without mass messaging.
+
+STRICT SCOPE:
+- Send only individual, context-specific LinkedIn messages to suitable qualified people who are already connected or legitimately messageable through an open profile.
+- Prefer people discovered through current Sales Navigator research and with clear Local SEO / Google Business Profile relevance.
+- Before each message check People, Interactions and Daily Growth Queue for duplicate outreach, Do Not Contact, ownership, previous messages and current relationship stage.
+- Do not send a second first-contact DM to the same person.
+- Do not ask for email in LinkedIn chat.
+- Keep messages natural, short and specific to the observed person/context; no generic blast copy, no invented facts, no company-name stuffing, no gendering.
+- Existing inbound replies belong to Inbox. If a reply is observed, stop prospecting that person and hand ownership to Inbox immediately.
+- Never bypass CAPTCHA, 2FA, checkpoints, warnings or rate limits.
+- Count a DM only after LinkedIn technically confirms it and log an Interactions record with Interaction Type=DM, Date=now, Sent?=true, the exact message, person link and Sent By=LOCENIX LinkedIn Agent/Agent.
+- If an action requires a manual approval under the existing approval model, prepare it and wait; never fabricate a send merely to satisfy quota.
 '''
 
 
@@ -119,6 +139,8 @@ def airtable_today() -> dict[str, int]:
         'qualified_leads_found': 0,
         'engagement_actions': 0,
         'connection_requests': 0,
+        'direct_messages': 0,
+        'reply_actions': 0,
         'replies_received': 0,
         'positive_replies': 0,
         'active_conversations': 0,
@@ -135,6 +157,16 @@ def airtable_today() -> dict[str, int]:
     comment_url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{CONTENT_OPPORTUNITIES}?pageSize=100&filterByFormula={comment_formula}'
     comment_data = get_json(comment_url, airtable_headers())
     totals['engagement_actions'] = len((comment_data or {}).get('records', []))
+
+    interaction_formula = urllib.parse.quote(f"AND(IS_SAME({{Date}}, '{today}', 'day'), {{Sent?}}=1)")
+    interaction_url = f'https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{INTERACTIONS}?pageSize=100&filterByFormula={interaction_formula}'
+    interaction_data = get_json(interaction_url, airtable_headers())
+    for rec in (interaction_data or {}).get('records', []):
+        kind = str((rec.get('fields') or {}).get('Interaction Type') or '').strip()
+        if kind == 'DM':
+            totals['direct_messages'] += 1
+        elif kind in {'DM Reply', 'Reply'}:
+            totals['reply_actions'] += 1
     return totals
 
 
@@ -216,8 +248,8 @@ def enqueue(
     return str(rows[0]['id'])
 
 
-def gaps(metrics: dict[str, int]) -> dict[str, int]:
-    return {key: max(0, int(target) - int(metrics.get(key) or 0)) for key, target in DAILY_TARGETS.items()}
+def gaps(metrics: dict[str, int], targets: dict[str, int]) -> dict[str, int]:
+    return {key: max(0, int(target) - int(metrics.get(key) or 0)) for key, target in targets.items()}
 
 
 def main() -> None:
@@ -226,7 +258,7 @@ def main() -> None:
         result = {
             'status': 'outside_business_hours',
             'checked_at': now.isoformat(),
-            'daily_targets': DAILY_TARGETS,
+            'daily_targets': {**DAILY_TARGETS, 'reply_actions': 0},
             'learning_run_count': int(load_learning().get('learning_run_count') or 0),
         }
         save(result)
@@ -234,28 +266,30 @@ def main() -> None:
         return
 
     metrics = airtable_today()
+    targets = {**DAILY_TARGETS, 'reply_actions': max(metrics['replies_received'], metrics['positive_replies'])}
+    current_gaps = gaps(metrics, targets)
     jobs = existing_active_jobs()
     active = active_department_roles(jobs)
     created: list[dict[str, str]] = []
 
     if (
-        metrics['positive_replies'] > 0
+        current_gaps['reply_actions'] > 0
+        or metrics['positive_replies'] > 0
         or metrics['active_conversations'] > 0
-        or metrics['replies_received'] > 0
     ) and 'inbox' not in active:
         created.append({'role': 'inbox', 'job_id': enqueue('inbox', department_role='inbox', priority_boost=30)})
         active.add('inbox')
 
-    if metrics['qualified_leads_found'] < DAILY_TARGETS['qualified_leads_found'] and 'lead' not in active:
-        remaining = max(1, DAILY_TARGETS['qualified_leads_found'] - metrics['qualified_leads_found'])
+    if metrics['qualified_leads_found'] < targets['qualified_leads_found'] and 'lead' not in active:
+        remaining = max(1, targets['qualified_leads_found'] - metrics['qualified_leads_found'])
         created.append({
             'role': 'lead',
             'job_id': enqueue('lead', department_role='lead', phase='research_v3', target=min(10, remaining), priority_boost=10),
         })
         active.add('lead')
 
-    if metrics['engagement_actions'] < DAILY_TARGETS['engagement_actions'] and 'engagement' not in active:
-        remaining = max(1, DAILY_TARGETS['engagement_actions'] - metrics['engagement_actions'])
+    if metrics['engagement_actions'] < targets['engagement_actions'] and 'engagement' not in active:
+        remaining = max(1, targets['engagement_actions'] - metrics['engagement_actions'])
         created.append({
             'role': 'engagement',
             'job_id': enqueue(
@@ -268,25 +302,38 @@ def main() -> None:
         })
         active.add('engagement')
 
-    if metrics['connection_requests'] < DAILY_TARGETS['connection_requests'] and 'outreach' not in active:
+    if metrics['connection_requests'] < targets['connection_requests'] and 'outreach' not in active:
         created.append({
             'role': 'outreach',
             'job_id': enqueue(
                 'growth',
                 department_role='outreach',
-                target=DAILY_TARGETS['connection_requests'] - metrics['connection_requests'],
+                target=targets['connection_requests'] - metrics['connection_requests'],
                 priority_boost=5,
             ),
         })
         active.add('outreach')
+
+    if metrics['direct_messages'] < targets['direct_messages'] and 'dm_outreach' not in active:
+        created.append({
+            'role': 'dm_outreach',
+            'job_id': enqueue(
+                'growth',
+                department_role='dm_outreach',
+                target=targets['direct_messages'] - metrics['direct_messages'],
+                priority_boost=7,
+                task_suffix=DM_PROMPT,
+            ),
+        })
+        active.add('dm_outreach')
 
     learning = load_learning()
     result = {
         'status': 'ok',
         'checked_at': now.isoformat(),
         'daily_metrics': metrics,
-        'daily_targets': DAILY_TARGETS,
-        'gaps': gaps(metrics),
+        'daily_targets': targets,
+        'gaps': current_gaps,
         'created_jobs': created,
         'active_roles_after_check': sorted(active),
         'learning': {
@@ -301,7 +348,7 @@ def main() -> None:
             'CONNECTION_SENT', 'CONNECTED', 'CONVERSATION_STARTED', 'INTERESTED',
             'CHECK_OFFERED', 'CHECK_ACCEPTED', 'TRIAL', 'PAID',
         ],
-        'rule': 'Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding. Learning may reprioritize tactics but never increase safety or outreach limits.',
+        'rule': 'Agent 8 must close observed daily LinkedIn gaps for qualified leads, comments, connection requests, individual DMs and same-day replies with executable work. One person may have only one operational owner and all CRM, approval and safety guardrails remain binding.',
     }
     save(result)
     print(json.dumps(result, ensure_ascii=False))
