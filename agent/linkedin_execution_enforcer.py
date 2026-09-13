@@ -15,6 +15,7 @@ AIRTABLE_BASE_ID = os.environ.get('AIRTABLE_BASE_ID', 'appN6ox7fjGFyXZhL')
 RUN_REPORTS = 'tblntmY8DXjSJWq8t'
 CONTENT_OPPORTUNITIES = 'tblbDiGu7EeQxnbx2'
 STATE = Path('results/linkedin_execution_state.json')
+LEARNING_CONFIG = Path('results/linkedin_learning_config.json')
 
 DAILY_TARGETS = {
     'qualified_leads_found': 10,
@@ -48,6 +49,43 @@ STRICT SCOPE:
 def save(obj: dict) -> None:
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def load_learning() -> dict:
+    try:
+        return json.loads(LEARNING_CONFIG.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def learning_prompt(role: str) -> str:
+    cfg = load_learning()
+    if not cfg:
+        return ''
+    preferred = [str(x) for x in (cfg.get('preferred_message_features') or [])[:5]]
+    avoid = [str(x) for x in (cfg.get('avoid_message_features') or [])[:5]]
+    title_stats = cfg.get('title_segment_stats') or {}
+    positive_segments = [
+        name for name, stats in sorted(
+            title_stats.items(),
+            key=lambda kv: (float((kv[1] or {}).get('avg_reward') or 0), int((kv[1] or {}).get('samples') or 0)),
+            reverse=True,
+        )
+        if int((stats or {}).get('samples') or 0) >= 5 and float((stats or {}).get('avg_reward') or 0) > 0
+    ][:4]
+    recommended_queries = [str(x) for x in (cfg.get('recommended_queries') or [])[:4]]
+    return (
+        '\n\nLINKEDIN LEARNING CONTEXT — ADVISORY, EVIDENCE-BASED, SAFETY BOUNDED:\n'
+        f'- Learning run: {cfg.get("learning_run_count", 0)}; exploration share: {cfg.get("exploration_share", 0.15)}.\n'
+        f'- Preferred message features with sufficient evidence: {preferred or ["insufficient-data"]}.\n'
+        f'- Avoid message features with sufficient negative evidence: {avoid or ["none"]}.\n'
+        f'- Historically stronger audience segments: {positive_segments or ["insufficient-data"]}.\n'
+        f'- Current recommended Sales Navigator searches: {recommended_queries or ["default"]}.\n'
+        '- Apply this only when it fits the specific person and observed context. Never copy a generic template blindly.\n'
+        '- Never override Do Not Contact, platform limits, daily contact caps, ownership rules, CAPTCHA/security handling or factual evidence.\n'
+        '- Preserve about 15% exploration over time; do not optimize away all diversity.\n'
+        f'- Runtime role receiving this context: {role}.\n'
+    )
 
 
 def get_json(url: str, headers: dict[str, str]) -> object:
@@ -143,9 +181,16 @@ def enqueue(
     task_suffix: str = '',
 ) -> str:
     task, max_steps, priority = template(role)
+    learned = learning_prompt(role)
+    if learned:
+        task = task + learned
     if task_suffix:
         task = task + task_suffix
     inp = {'agent_role': role, 'scheduled': False, 'source': 'agent8-execution-enforcer'}
+    learning = load_learning()
+    if learning:
+        inp['learning_run_count'] = int(learning.get('learning_run_count') or 0)
+        inp['learning_exploration_share'] = float(learning.get('exploration_share') or 0.15)
     if department_role:
         inp['department_role'] = department_role
     if phase:
@@ -182,6 +227,7 @@ def main() -> None:
             'status': 'outside_business_hours',
             'checked_at': now.isoformat(),
             'daily_targets': DAILY_TARGETS,
+            'learning_run_count': int(load_learning().get('learning_run_count') or 0),
         }
         save(result)
         print(json.dumps(result, ensure_ascii=False))
@@ -234,6 +280,7 @@ def main() -> None:
         })
         active.add('outreach')
 
+    learning = load_learning()
     result = {
         'status': 'ok',
         'checked_at': now.isoformat(),
@@ -242,12 +289,19 @@ def main() -> None:
         'gaps': gaps(metrics),
         'created_jobs': created,
         'active_roles_after_check': sorted(active),
+        'learning': {
+            'enabled': bool(learning),
+            'learning_run_count': int(learning.get('learning_run_count') or 0),
+            'recommended_queries': (learning.get('recommended_queries') or [])[:5],
+            'preferred_message_features': (learning.get('preferred_message_features') or [])[:5],
+            'exploration_share': float(learning.get('exploration_share') or 0.15),
+        },
         'funnel_order': [
             'DISCOVERED', 'QUALIFIED', 'ENGAGE', 'ENGAGED', 'CONNECTION_READY',
             'CONNECTION_SENT', 'CONNECTED', 'CONVERSATION_STARTED', 'INTERESTED',
             'CHECK_OFFERED', 'CHECK_ACCEPTED', 'TRIAL', 'PAID',
         ],
-        'rule': 'Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding.',
+        'rule': 'Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding. Learning may reprioritize tactics but never increase safety or outreach limits.',
     }
     save(result)
     print(json.dumps(result, ensure_ascii=False))
