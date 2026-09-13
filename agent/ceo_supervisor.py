@@ -7,6 +7,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from agent import llm_router
+
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 AIRTABLE_PAT = os.environ['AIRTABLE_PAT']
@@ -110,7 +112,6 @@ def today_metrics() -> dict[str, int]:
         email = str(f.get('Email') or '').strip().lower()
         if email:
             sent_emails.add(email)
-
     return {'qualified_leads': len(unique_today), 'connections': connections, 'dms': dms, 'comments': comments, 'emails': len(sent_emails)}
 
 
@@ -119,6 +120,10 @@ def _dt(value: object) -> datetime | None:
         return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
     except Exception:
         return None
+
+
+def _any_provider_env(prefixes: tuple[str, ...]) -> bool:
+    return any(any(name.startswith(prefix) and str(value).strip() for name, value in os.environ.items()) for prefix in prefixes)
 
 
 def recent_job_health() -> dict:
@@ -154,20 +159,15 @@ def recent_job_health() -> dict:
             if locked and (now - locked).total_seconds() > 1800:
                 stale_running.append(str(row.get('id')))
 
-    alternative_configured = any(os.getenv(k, '').strip() for k in ('BROWSER_USE_API_KEY', 'GOOGLE_API_KEY', 'ANTHROPIC_API_KEY'))
-    llm_credit_blocked = bool(
-        latest_credit_failure
-        and not alternative_configured
-        and (latest_llm_success is None or latest_llm_success <= latest_credit_failure)
-    )
-    no_llm_provider = not any(os.getenv(k, '').strip() for k in ('BROWSER_USE_API_KEY','GOOGLE_API_KEY','ANTHROPIC_API_KEY','OPENAI_API_KEY'))
-    email_provider_missing = not bool(os.getenv('RESEND_API_KEY', '').strip())
+    alternative_configured = _any_provider_env(('GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'BROWSER_USE_API_KEY'))
+    any_llm_configured = _any_provider_env(('GOOGLE_API_KEY', 'ANTHROPIC_API_KEY', 'BROWSER_USE_API_KEY', 'OPENAI_API_KEY'))
+    llm_credit_blocked = bool(latest_credit_failure and not alternative_configured and (latest_llm_success is None or latest_llm_success <= latest_credit_failure))
     return {
         'failed_last_6h': failed,
         'blocked_llm_credits': llm_credit_blocked,
-        'blocked_no_llm_provider': no_llm_provider,
+        'blocked_no_llm_provider': not any_llm_configured,
         'alternative_llm_provider_configured': alternative_configured,
-        'blocked_email_provider_secret': email_provider_missing,
+        'blocked_email_provider_secret': not bool(os.getenv('RESEND_API_KEY', '').strip()),
         'blocked_linkedin_security': security,
         'stale_running_jobs': stale_running,
     }
@@ -193,7 +193,7 @@ def update_objectives(metrics: dict[str, int], health: dict) -> int:
             blocker = 'BLOCKED_LLM_PROVIDER: no usable inference-provider secret is configured for LLM-dependent LinkedIn execution.'
             is_blocked = True
         elif current < target and metric_key in {'connections', 'dms', 'comments'} and health.get('blocked_llm_credits'):
-            blocker = 'BLOCKED_LLM_CREDITS: OpenAI returned credit_balance_exhausted and no alternative Browser Use/Google/Anthropic provider is configured.'
+            blocker = 'BLOCKED_LLM_CREDITS: provider credits are exhausted and no alternative provider is configured.'
             is_blocked = True
         elif current < target and health.get('blocked_linkedin_security') and metric_key in {'qualified_leads','connections','dms','comments'}:
             blocker = 'BLOCKED_PLATFORM: explicit LinkedIn security verification detected.'
@@ -211,6 +211,28 @@ def update_objectives(metrics: dict[str, int], health: dict) -> int:
     return len(updates)
 
 
+def executive_analysis(metrics: dict[str, int], gaps: dict[str, int], health: dict) -> dict | None:
+    if not any(gaps.values()) or not llm_router.configured_slots(llm_router.TASK_EXECUTIVE_ANALYSIS):
+        return None
+    prompt = f"""You are Agent 0's executive analysis helper for LOCENIX. The numbers below are immutable technical measurements; never change or invent them. Return JSON only with keys priority_order (array of metric names), diagnosis (short string), next_actions (max 4 concise actions), and blocker_notes (array). Prefer actions that can close today's verified gaps safely. Do not suggest bypassing LinkedIn security/rate limits or sending unapproved email.
+
+ACTUAL={json.dumps(metrics)}
+GAPS={json.dumps(gaps)}
+HEALTH={json.dumps(health)}
+"""
+    try:
+        text, meta = llm_router.text_complete(prompt, task_type=llm_router.TASK_EXECUTIVE_ANALYSIS, max_output_tokens=650)
+        cleaned = text.strip().strip('`')
+        if cleaned.startswith('json'):
+            cleaned = cleaned[4:].lstrip()
+        analysis = json.loads(cleaned)
+        if not isinstance(analysis, dict):
+            return None
+        return {'analysis': analysis, 'llm': meta}
+    except Exception as exc:
+        return {'analysis': None, 'error': str(exc)[:1000]}
+
+
 def main() -> None:
     metrics = today_metrics()
     health = recent_job_health()
@@ -223,7 +245,8 @@ def main() -> None:
         'checked_at': datetime.now(ZoneInfo('Europe/Berlin')).isoformat(),
         'targets': TARGETS,'actual': metrics,'gaps': gaps,'health': health,
         'objectives_updated': updated,
-        'rule': 'Only technically confirmed evidence counts. Re-measure every control run; gaps remain actionable until target is met or a real external blocker is documented.',
+        'executive_analysis': executive_analysis(metrics, gaps, health),
+        'rule': 'Only technically confirmed evidence counts. LLM analysis may prioritize work but may never alter measured KPI facts.',
     }
     print(json.dumps(report, ensure_ascii=False))
 
