@@ -2,18 +2,46 @@
   "control": {
     "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
     "reports_to": "AGENT_0_LOCENIX_CEO",
-    "generated_at": "2026-09-13T05:57:08.604397+00:00",
-    "control_status": "OUTSIDE_BUSINESS_HOURS",
+    "generated_at": "2026-09-13T10:11:08.148964+00:00",
+    "control_status": "WORKING",
     "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
     "targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
       "connection_requests": 5
     },
-    "actual": {},
-    "gaps": {},
-    "created_jobs": [],
-    "active_roles": [],
+    "actual": {
+      "qualified_leads_found": 0,
+      "engagement_actions": 0,
+      "connection_requests": 0,
+      "replies_received": 0,
+      "positive_replies": 0,
+      "active_conversations": 0
+    },
+    "gaps": {
+      "qualified_leads_found": 10,
+      "engagement_actions": 3,
+      "connection_requests": 5
+    },
+    "created_jobs": [
+      {
+        "role": "lead",
+        "job_id": "afa11bf7-e8af-4461-a8bc-5596f3115328"
+      },
+      {
+        "role": "engagement",
+        "job_id": "81534b06-97cd-497b-a58a-8685157f15cf"
+      },
+      {
+        "role": "outreach",
+        "job_id": "f492f47d-b1fa-4d15-bba1-7ad383abc55f"
+      }
+    ],
+    "active_roles": [
+      "engagement",
+      "lead",
+      "outreach"
+    ],
     "department_status": "HEALTHY",
     "biggest_bottleneck": "POSITIVE_REPLIES",
     "priority_1": {
@@ -21,13 +49,27 @@
       "action": "Prioritize positive replies and active qualified conversations before new prospecting.",
       "owner": "Conversation / Inbox Agent"
     },
-    "funnel_order": [],
+    "funnel_order": [
+      "DISCOVERED",
+      "QUALIFIED",
+      "ENGAGE",
+      "ENGAGED",
+      "CONNECTION_READY",
+      "CONNECTION_SENT",
+      "CONNECTED",
+      "CONVERSATION_STARTED",
+      "INTERESTED",
+      "CHECK_OFFERED",
+      "CHECK_ACCEPTED",
+      "TRIAL",
+      "PAID"
+    ],
     "ceo_attention_required": false,
-    "corrective_action": "No new external LinkedIn work is started outside the configured business-hours window.",
+    "corrective_action": "Agent 8 has active work assigned against the observed daily funnel gaps; re-measure on the next control run.",
     "management_rule": "TARGET -> ACTUAL -> GAP -> ACTION -> RE-MEASURE. A healthy workflow is not sufficient evidence; funnel movement and executed work are required."
   },
   "department": {
-    "last_run_at": "2026-09-13T05:57:08.474460+00:00",
+    "last_run_at": "2026-09-13T10:11:05.851889+00:00",
     "department_status": "HEALTHY",
     "department_health": "HEALTHY",
     "leads": 61,
@@ -80,7 +122,7 @@
       "priority": 2,
       "success_metric": "Agent 8 reports the bottleneck reduced or resolved using observed Airtable/Supabase evidence.",
       "created_at": "2026-09-12T12:08:42.961312+00:00",
-      "updated_at": "2026-09-13T05:22:00.589635+00:00",
+      "updated_at": "2026-09-13T08:43:55.697042+00:00",
       "status": "QUEUED",
       "external_action_authorized": false
     },
@@ -89,13 +131,75 @@
     "ceo_message": "No CEO intervention required from currently observed evidence."
   },
   "execution": {
-    "status": "outside_business_hours",
-    "checked_at": "2026-09-13T07:57:08.556732+02:00",
+    "status": "ok",
+    "checked_at": "2026-09-13T12:11:05.938019+02:00",
+    "daily_metrics": {
+      "qualified_leads_found": 0,
+      "engagement_actions": 0,
+      "connection_requests": 0,
+      "replies_received": 0,
+      "positive_replies": 0,
+      "active_conversations": 0
+    },
     "daily_targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
       "connection_requests": 5
     },
-    "learning_run_count": 2
+    "gaps": {
+      "qualified_leads_found": 10,
+      "engagement_actions": 3,
+      "connection_requests": 5
+    },
+    "created_jobs": [
+      {
+        "role": "lead",
+        "job_id": "afa11bf7-e8af-4461-a8bc-5596f3115328"
+      },
+      {
+        "role": "engagement",
+        "job_id": "81534b06-97cd-497b-a58a-8685157f15cf"
+      },
+      {
+        "role": "outreach",
+        "job_id": "f492f47d-b1fa-4d15-bba1-7ad383abc55f"
+      }
+    ],
+    "active_roles_after_check": [
+      "engagement",
+      "lead",
+      "outreach"
+    ],
+    "learning": {
+      "enabled": true,
+      "learning_run_count": 3,
+      "recommended_queries": [
+        "Inhaber Handwerk",
+        "Geschäftsführer lokale Dienstleistungen",
+        "Inhaber Physiotherapie",
+        "Inhaber Kosmetikstudio",
+        "Inhaber Autowerkstatt"
+      ],
+      "preferred_message_features": [
+        "length_short"
+      ],
+      "exploration_share": 0.15
+    },
+    "funnel_order": [
+      "DISCOVERED",
+      "QUALIFIED",
+      "ENGAGE",
+      "ENGAGED",
+      "CONNECTION_READY",
+      "CONNECTION_SENT",
+      "CONNECTED",
+      "CONVERSATION_STARTED",
+      "INTERESTED",
+      "CHECK_OFFERED",
+      "CHECK_ACCEPTED",
+      "TRIAL",
+      "PAID"
+    ],
+    "rule": "Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding. Learning may reprioritize tactics but never increase safety or outreach limits."
   }
 }
