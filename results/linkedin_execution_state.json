@@ -1,83 +1,12 @@
 {
-  "status": "ok",
-  "checked_at": "2026-09-13T13:35:23.813840+02:00",
-  "daily_metrics": {
-    "qualified_leads_found": 1,
-    "engagement_actions": 0,
-    "connection_requests": 1,
-    "direct_messages": 0,
-    "reply_actions": 0,
-    "replies_received": 0,
-    "positive_replies": 0,
-    "active_conversations": 0
-  },
+  "status": "outside_business_hours",
+  "checked_at": "2026-09-13T20:08:14.044089+02:00",
   "daily_targets": {
-    "qualified_leads_found": 10,
+    "qualified_leads_found": 20,
     "engagement_actions": 3,
-    "connection_requests": 5,
-    "direct_messages": 3,
+    "connection_requests": 10,
+    "direct_messages": 5,
     "reply_actions": 0
   },
-  "gaps": {
-    "qualified_leads_found": 9,
-    "engagement_actions": 3,
-    "connection_requests": 4,
-    "direct_messages": 3,
-    "reply_actions": 0
-  },
-  "created_jobs": [
-    {
-      "role": "lead",
-      "job_id": "92af351b-9619-4cae-8bb6-d3334f40f6a1"
-    },
-    {
-      "role": "engagement",
-      "job_id": "02a700cd-a461-44a7-be5a-7625e8272649"
-    },
-    {
-      "role": "outreach",
-      "job_id": "ec7e429d-1573-4a52-9929-27f5c4cfb11e"
-    },
-    {
-      "role": "dm_outreach",
-      "job_id": "53f3c72b-d1ae-4b7e-b5f5-8a86d8bcde04"
-    }
-  ],
-  "active_roles_after_check": [
-    "dm_outreach",
-    "engagement",
-    "lead",
-    "outreach"
-  ],
-  "learning": {
-    "enabled": true,
-    "learning_run_count": 8,
-    "recommended_queries": [
-      "Inhaber Handwerk",
-      "Geschäftsführer lokale Dienstleistungen",
-      "Inhaber Physiotherapie",
-      "Inhaber Kosmetikstudio",
-      "Inhaber Autowerkstatt"
-    ],
-    "preferred_message_features": [
-      "length_short"
-    ],
-    "exploration_share": 0.15
-  },
-  "funnel_order": [
-    "DISCOVERED",
-    "QUALIFIED",
-    "ENGAGE",
-    "ENGAGED",
-    "CONNECTION_READY",
-    "CONNECTION_SENT",
-    "CONNECTED",
-    "CONVERSATION_STARTED",
-    "INTERESTED",
-    "CHECK_OFFERED",
-    "CHECK_ACCEPTED",
-    "TRIAL",
-    "PAID"
-  ],
-  "rule": "Agent 8 must close observed daily LinkedIn gaps for qualified leads, comments, connection requests, individual DMs and same-day replies with executable work. One person may have only one operational owner and all CRM, approval and safety guardrails remain binding."
+  "learning_run_count": 9
 }
