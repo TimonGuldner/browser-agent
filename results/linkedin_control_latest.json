@@ -2,7 +2,7 @@
   "control": {
     "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
     "reports_to": "AGENT_0_LOCENIX_CEO",
-    "generated_at": "2026-09-13T18:08:14.091751+00:00",
+    "generated_at": "2026-09-13T18:14:32.142262+00:00",
     "control_status": "OUTSIDE_BUSINESS_HOURS",
     "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
     "targets": {
@@ -31,7 +31,7 @@
     "management_rule": "TARGET -> ACTUAL -> EXPECTED-BY-NOW -> GAP -> ACTION -> RE-MEASURE. Hard daily targets are measured by executed evidence, not workflow health."
   },
   "department": {
-    "last_run_at": "2026-09-13T18:08:13.373924+00:00",
+    "last_run_at": "2026-09-13T18:14:31.781770+00:00",
     "department_status": "ATTENTION",
     "department_health": "ATTENTION",
     "leads": 66,
@@ -94,7 +94,7 @@
   },
   "execution": {
     "status": "outside_business_hours",
-    "checked_at": "2026-09-13T20:08:14.044089+02:00",
+    "checked_at": "2026-09-13T20:14:32.088138+02:00",
     "daily_targets": {
       "qualified_leads_found": 20,
       "engagement_actions": 3,
@@ -102,6 +102,6 @@
       "direct_messages": 5,
       "reply_actions": 0
     },
-    "learning_run_count": 9
+    "learning_run_count": 10
   }
 }

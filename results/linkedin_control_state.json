@@ -1,7 +1,7 @@
 {
   "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "generated_at": "2026-09-13T18:08:14.091751+00:00",
+  "generated_at": "2026-09-13T18:14:32.142262+00:00",
   "control_status": "OUTSIDE_BUSINESS_HOURS",
   "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
   "targets": {
