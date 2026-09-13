@@ -1,6 +1,5 @@
 LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
 Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries.
-Cost Architecture V3 enabled: scheduled Lead research uses deterministic Playwright + Airtable dedupe with zero LLM calls; Luna is reserved for short outreach/personalization decisions.
-Lead target: 10. Research and outreach are split.
-Wake: run three approved single-contact outreach jobs on 2026-09-10 at 17:09 Europe/Berlin.
+Hard daily LinkedIn quota jobs queued by Agent 8 must be processed now.
+Wake: 2026-09-13 12:52 Europe/Berlin — process lead, engagement, connection-request and DM quota jobs.
