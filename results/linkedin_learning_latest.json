@@ -1,0 +1,173 @@
+{
+  "state": {
+    "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
+    "last_run_at": "2026-09-13T05:54:38.141620+00:00",
+    "status": "OK",
+    "learning_run_count": 1,
+    "people_evaluated": 61,
+    "interactions_observed": 83,
+    "run_reports_observed": 11,
+    "query_attribution_count": 0,
+    "learned_queries": 0,
+    "learned_message_features": 6,
+    "recommended_query": "Geschäftsführer lokale Dienstleistungen",
+    "exploration_share": 0.15,
+    "errors": 0
+  },
+  "learning": {
+    "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
+    "generated_at": "2026-09-13T05:54:38.141620+00:00",
+    "learning_run_count": 1,
+    "mode": "SAFE_OUTCOME_LEARNING",
+    "principle": "Learn priorities from measured LinkedIn/Airtable outcomes; never rewrite executable code or bypass safety rules.",
+    "exploration_share": 0.15,
+    "minimum_samples_before_downweight": 5,
+    "query_weights": {
+      "Inhaber Handwerk": 1.0,
+      "Geschäftsführer lokale Dienstleistungen": 1.0,
+      "Inhaber Physiotherapie": 1.0,
+      "Inhaber Kosmetikstudio": 1.0,
+      "Inhaber Autowerkstatt": 1.0,
+      "Inhaber Gebäudereinigung": 1.0,
+      "Inhaber Dachdecker": 1.0,
+      "Inhaber Elektriker": 1.0
+    },
+    "recommended_queries": [
+      "Geschäftsführer lokale Dienstleistungen",
+      "Inhaber Autowerkstatt",
+      "Inhaber Dachdecker",
+      "Inhaber Elektriker",
+      "Inhaber Gebäudereinigung",
+      "Inhaber Handwerk",
+      "Inhaber Kosmetikstudio",
+      "Inhaber Physiotherapie"
+    ],
+    "preferred_message_features": [
+      "length_short",
+      "generic_topic"
+    ],
+    "avoid_message_features": [],
+    "preferred_time_slots_berlin": [],
+    "title_segment_stats": {
+      "marketing": {
+        "samples": 24,
+        "reward": 6.25,
+        "avg_reward": 0.26,
+        "positive_rate": 0.042,
+        "negative_rate": 0.0
+      },
+      "owner_founder": {
+        "samples": 24,
+        "reward": 10.5,
+        "avg_reward": 0.438,
+        "positive_rate": 0.125,
+        "negative_rate": 0.0
+      },
+      "other": {
+        "samples": 8,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "home_services": {
+        "samples": 3,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "agency": {
+        "samples": 1,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "automotive": {
+        "samples": 1,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      }
+    },
+    "source_stats": {
+      "Manual Research": {
+        "samples": 5,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "LinkedIn Search": {
+        "samples": 54,
+        "reward": 16.5,
+        "avg_reward": 0.306,
+        "positive_rate": 0.074,
+        "negative_rate": 0.0
+      },
+      "Comment Section": {
+        "samples": 2,
+        "reward": 0.25,
+        "avg_reward": 0.125,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      }
+    },
+    "message_feature_stats": {
+      "length_short": {
+        "samples": 9,
+        "reward": 15.0,
+        "avg_reward": 1.667,
+        "positive_rate": 0.444,
+        "negative_rate": 0.0
+      },
+      "question": {
+        "samples": 8,
+        "reward": 10.0,
+        "avg_reward": 1.25,
+        "positive_rate": 0.375,
+        "negative_rate": 0.0
+      },
+      "no_check_cta": {
+        "samples": 8,
+        "reward": 10.0,
+        "avg_reward": 1.25,
+        "positive_rate": 0.375,
+        "negative_rate": 0.0
+      },
+      "generic_topic": {
+        "samples": 9,
+        "reward": 15.0,
+        "avg_reward": 1.667,
+        "positive_rate": 0.444,
+        "negative_rate": 0.0
+      },
+      "no_question": {
+        "samples": 1,
+        "reward": 5.0,
+        "avg_reward": 5.0,
+        "positive_rate": 1.0,
+        "negative_rate": 0.0
+      },
+      "check_cta": {
+        "samples": 1,
+        "reward": 5.0,
+        "avg_reward": 5.0,
+        "positive_rate": 1.0,
+        "negative_rate": 0.0
+      }
+    },
+    "variant_stats": {},
+    "query_stats": {},
+    "guardrails": {
+      "do_not_contact_never_overridden": true,
+      "daily_contact_limits_never_increased": true,
+      "captcha_or_security_bypass": false,
+      "new_linkedin_account": false,
+      "autonomous_code_rewrite": false,
+      "prompt_rewrite": false
+    }
+  }
+}
