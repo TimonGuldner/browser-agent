@@ -129,7 +129,7 @@ jobs:
         continue-on-error: true
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_PAT }}
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQws5ZL
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
           EMAIL_DAILY_LIMIT: '20'
           EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
           EMAIL_REPLY_TO: 'hello@locenix.com'
