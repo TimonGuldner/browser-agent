@@ -40,6 +40,9 @@ HARD_BLOCK_MARKERS = (
     "openai_api_key is not configured",
     "airtable_pat is not configured",
     "missing api secret",
+    "credit_balance_exhausted",
+    "insufficient_quota",
+    "no credits remaining",
 )
 
 EDITABLE_FILES = {
@@ -90,7 +93,6 @@ def needs_llm_repair(job: dict[str, Any]) -> bool:
     if int(input_data.get("llm_repair_count") or 0) >= MAX_LLM_REPAIRS_PER_CHAIN:
         return False
     retry_count = int(input_data.get("supervisor_retry_count") or 0)
-    # Unknown errors go directly to diagnosis. Known transient errors get two cheap retries first.
     return (not is_known_retryable(job)) or retry_count >= 2
 
 
@@ -132,7 +134,6 @@ def repo_context() -> str:
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        # Enough source to diagnose while bounding token cost.
         if len(text) > 24000:
             text = text[:12000] + "\n...<middle omitted>...\n" + text[-12000:]
         chunks.append(f"\n===== {rel} =====\n{text}")
@@ -183,11 +184,7 @@ JSON schema:
 {{"action":"patch|diagnose","file_path":"agent/...py or empty","patch":"unified diff or empty","reason":"concise root cause and remedy","confidence":0.0,"test_plan":"concise"}}
 """
     client = OpenAI(api_key=OPENAI_API_KEY)
-    response = client.responses.create(
-        model=OPENAI_MODEL,
-        input=prompt,
-        max_output_tokens=2600,
-    )
+    response = client.responses.create(model=OPENAI_MODEL, input=prompt, max_output_tokens=2600)
     return parse_json_response(response.output_text)
 
 
@@ -248,43 +245,39 @@ def current_task(db: Client, role: str, fallback: str) -> tuple[str, int, int]:
         .data
     )
     if not row or not row.get("enabled", True):
-        return fallback, 40, 100
+        return fallback, 40, 50
     adapter = str(row.get("runtime_adapter") or "").strip()
     prompt = str(row.get("prompt") or "").strip()
-    return "\n\n".join(x for x in (adapter, prompt) if x) or fallback, int(row.get("max_steps") or 40), int(row.get("priority") or 100)
+    return "\n\n".join(x for x in (adapter, prompt) if x) or fallback, int(row.get("max_steps") or 40), int(row.get("priority") or 50)
 
 
 def enqueue_controlled_test(db: Client, job: dict[str, Any], commit_sha: str | None) -> str | None:
     input_data = dict(job.get("input") or {})
     role = str(input_data.get("agent_role") or "").strip().lower()
-    if role not in {"inbox", "growth", "lead", "content"}:
+    if role not in {"inbox", "growth", "lead", "content", "outreach"}:
         return None
     task, max_steps, priority = current_task(db, role, str(job.get("task") or ""))
     new_input = dict(input_data)
-    new_input.update(
-        {
-            "source": "llm-repair-test",
-            "repair_of": str(job["id"]),
-            "llm_repair_count": int(input_data.get("llm_repair_count") or 0) + 1,
-            "supervisor_retry_count": 0,
-            "scheduled": False,
-            "repair_commit": commit_sha,
-        }
-    )
+    new_input.update({
+        "source": "llm-repair-test",
+        "repair_of": str(job["id"]),
+        "llm_repair_count": int(input_data.get("llm_repair_count") or 0) + 1,
+        "supervisor_retry_count": 0,
+        "scheduled": False,
+        "repair_commit": commit_sha,
+    })
     if role == "lead":
-        new_input["target_new_profiles"] = 10
+        new_input["target_new_profiles"] = int(input_data.get("target_new_profiles") or 10)
     created = (
         db.table("agent_jobs")
-        .insert(
-            {
-                "status": "queued",
-                "task": task,
-                "mode": str(job.get("mode") or "autonomous"),
-                "priority": min(int(job.get("priority") or priority), priority),
-                "max_steps": max_steps,
-                "input": new_input,
-            }
-        )
+        .insert({
+            "status": "queued",
+            "task": task,
+            "mode": str(job.get("mode") or "autonomous"),
+            "priority": max(int(job.get("priority") or 0), priority),
+            "max_steps": max_steps,
+            "input": new_input,
+        })
         .execute()
         .data
         or []
