@@ -2,8 +2,6 @@ import os
 from typing import Any
 
 from browser_use import Agent as BrowserUseAgent
-from browser_use import ChatOpenAI as BrowserUseChatOpenAI
-from browser_use import ChatBrowserUse, ChatGoogle, ChatAnthropic
 
 from agent.airtable_tools import build_airtable_tools
 from agent.extended_airtable_tools import add_extended_airtable_tools
@@ -11,9 +9,9 @@ from agent.cost_gate import evaluate_inbox_gate, mark_inbox_llm_completed, probe
 from agent import local_worker
 from agent import profile_patch
 from agent import lead_v3
+from agent import llm_router
 
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna").strip()
-MONTHLY_LLM_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
+MONTHLY_OPENAI_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
 
 ROLE_POLICIES: dict[str, dict[str, Any]] = {
     "inbox": {"max_steps": 30,"max_history_items": 12,"run_budget_usd": 0.12,"reasoning_effort": "medium","flash_mode": False,"use_thinking": True,"max_completion_tokens": 2600,"max_clickable_elements_length": 16000,"use_judge": True,"enable_planning": True},
@@ -23,13 +21,8 @@ ROLE_POLICIES: dict[str, dict[str, Any]] = {
 }
 DEFAULT_POLICY = {"max_steps": 24,"max_history_items": 8,"run_budget_usd": 0.12,"reasoning_effort": "medium","flash_mode": False,"use_thinking": True,"max_completion_tokens": 2600,"max_clickable_elements_length": 12000,"use_judge": False,"enable_planning": False}
 
-INPUT_USD_PER_M = 0.20
-CACHED_INPUT_USD_PER_M = 0.02
-OUTPUT_USD_PER_M = 1.20
-_USAGE = {"prompt_tokens": 0, "cached_prompt_tokens": 0, "completion_tokens": 0}
-_CURRENT_RUN_BUDGET_USD = float(DEFAULT_POLICY["run_budget_usd"])
-_ACTIVE_PROVIDER = "unknown"
-_ACTIVE_MODEL = "unknown"
+_ACTIVE_SLOT: llm_router.ProviderSlot | None = None
+_ACTIVE_TASK_TYPE = llm_router.TASK_BROWSER_REASONING
 
 AIRTABLE_RULES = """
 
@@ -53,10 +46,10 @@ COST-EFFICIENT EXECUTION RULES:
 - Keep final reports concise; do not narrate routine browser steps.
 - Stop immediately when the run has no meaningful next action.
 - Never manufacture activity merely to fill a quota.
-- For Lead, research/CRM work comes before outreach. The hard CEO daily target is measured independently; deterministic research jobs receive the exact remaining target.
+- For Lead, research/CRM work comes before outreach. Deterministic research jobs receive the exact remaining target and use zero LLM calls.
 - Do not repeatedly reopen the same Sales Navigator result or re-read the same Airtable context in one run.
 - Keep only the minimum browser state needed for the current person. Do not carry large prior DOM snapshots forward.
-- Scheduled Lead research is handled by deterministic Playwright V3 with zero LLM calls. LLM providers are reserved for outreach/personalization/conversation decisions.
+- An LLM response is never proof of an external action. Only technically confirmed LinkedIn evidence may update action KPIs.
 """
 
 
@@ -65,103 +58,15 @@ def _policy_for_current_role() -> dict[str, Any]:
     return ROLE_POLICIES.get(role, DEFAULT_POLICY)
 
 
-def _reset_usage(run_budget_usd: float) -> None:
-    global _CURRENT_RUN_BUDGET_USD
-    _USAGE.update({"prompt_tokens": 0, "cached_prompt_tokens": 0, "completion_tokens": 0})
-    _CURRENT_RUN_BUDGET_USD = run_budget_usd
-
-
-def _estimated_cost_usd() -> float:
-    prompt = int(_USAGE["prompt_tokens"])
-    cached = min(prompt, int(_USAGE["cached_prompt_tokens"]))
-    uncached = max(0, prompt - cached)
-    return (uncached * INPUT_USD_PER_M + cached * CACHED_INPUT_USD_PER_M + int(_USAGE["completion_tokens"]) * OUTPUT_USD_PER_M) / 1_000_000
-
-
-class MeteredChatOpenAI(BrowserUseChatOpenAI):
-    async def ainvoke(self, messages, output_format=None, **kwargs):
-        if _estimated_cost_usd() >= _CURRENT_RUN_BUDGET_USD:
-            raise RuntimeError(f"LOCENIX per-run LLM safety budget reached (${_CURRENT_RUN_BUDGET_USD:.2f}).")
-        response = await super().ainvoke(messages, output_format=output_format, **kwargs)
-        usage = getattr(response, "usage", None)
-        if usage is not None:
-            _USAGE["prompt_tokens"] += int(getattr(usage, "prompt_tokens", 0) or 0)
-            _USAGE["cached_prompt_tokens"] += int(getattr(usage, "prompt_cached_tokens", 0) or 0)
-            _USAGE["completion_tokens"] += int(getattr(usage, "completion_tokens", 0) or 0)
-        return response
-
-
-def _configured_provider_chain() -> list[str]:
-    """Provider preference for automatic failover.
-
-    Default order is OpenAI -> Google/Gemini -> Anthropic -> Browser Use.
-    LOCENIX_LLM_PROVIDER may force a single provider for debugging.
-    """
-    requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
-    configured = {
-        "openai": bool(os.getenv("OPENAI_API_KEY", "").strip()),
-        "google": bool(os.getenv("GOOGLE_API_KEY", "").strip()),
-        "anthropic": bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
-        "browser_use": bool(os.getenv("BROWSER_USE_API_KEY", "").strip()),
-    }
-    if requested != "auto":
-        return [requested] if configured.get(requested) else []
-    return [name for name in ("openai", "google", "anthropic", "browser_use") if configured[name]]
-
-
-def openai_llm(*args, **kwargs):
-    """Construct the provider selected for this attempt.
-
-    Automatic retry/failover is handled around the complete browser-agent run so a
-    failed OpenAI attempt can be restarted cleanly on Gemini.
-    """
-    global _ACTIVE_PROVIDER, _ACTIVE_MODEL
-    requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
-    provider = requested if requested != "auto" else (_configured_provider_chain()[0] if _configured_provider_chain() else "")
-
-    if provider == "openai" and os.getenv("OPENAI_API_KEY", "").strip():
-        policy = _policy_for_current_role()
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "openai", OPENAI_MODEL
-        return MeteredChatOpenAI(
-            model=OPENAI_MODEL, api_key=os.getenv("OPENAI_API_KEY", "").strip(), temperature=None, frequency_penalty=None,
-            reasoning_effort=str(policy["reasoning_effort"]), reasoning_models=[OPENAI_MODEL],
-            max_completion_tokens=int(policy["max_completion_tokens"]), timeout=100, max_retries=2,
-        )
-    if provider == "google" and os.getenv("GOOGLE_API_KEY", "").strip():
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "google", "gemini-2.5-flash"
-        return ChatGoogle(model="gemini-2.5-flash")
-    if provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY", "").strip():
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "anthropic", "claude-sonnet-4-6"
-        return ChatAnthropic(model="claude-sonnet-4-6")
-    if provider == "browser_use" and os.getenv("BROWSER_USE_API_KEY", "").strip():
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "browser_use", "bu-latest"
-        return ChatBrowserUse()
-    raise RuntimeError("BLOCKED_LLM_PROVIDER: selected provider is not configured for LOCENIX.")
-
-
-def _provider_failure_text(db, job_id: str, exc: Exception | None = None) -> str:
-    parts: list[str] = []
-    if exc is not None:
-        parts.append(str(exc))
-    try:
-        row = db.table("agent_jobs").select("status,error,result").eq("id", job_id).single().execute().data or {}
-        parts.append(str(row.get("error") or ""))
-        result = row.get("result") or {}
-        parts.append(str(result.get("errors") or ""))
-        parts.append(str(result.get("final_result") or ""))
-    except Exception:
-        pass
-    return " ".join(parts).lower()
-
-
-def _should_failover(text: str) -> bool:
-    provider_markers = (
-        "credit_balance_exhausted", "insufficient_quota", "quota", "billing", "429",
-        "rate limit", "rate_limit", "401", "403", "authentication", "api key", "api_key",
-        "model not found", "model_not_found", "provider unavailable", "service unavailable",
-        "overloaded", "capacity", "llm provider", "llm request", "resource exhausted",
+def routed_llm(*args, **kwargs):
+    if _ACTIVE_SLOT is None:
+        raise RuntimeError("BLOCKED_LLM_PROVIDER: no active routed provider slot")
+    policy = _policy_for_current_role()
+    return llm_router.create_browser_llm(
+        _ACTIVE_SLOT,
+        reasoning_effort=str(policy["reasoning_effort"]),
+        max_completion_tokens=int(policy["max_completion_tokens"]),
     )
-    return any(marker in text for marker in provider_markers)
 
 
 class AirtableEnabledAgent(BrowserUseAgent):
@@ -185,34 +90,41 @@ class AirtableEnabledAgent(BrowserUseAgent):
         super().__init__(*args, **kwargs)
 
 
-def _monthly_cost(db) -> float:
+def _monthly_openai_cost(db) -> float:
     try:
         value = db.rpc("agent_monthly_llm_cost", {}).execute().data
         return float(value or 0)
-    except Exception as exc:
-        raise RuntimeError("Could not read the monthly LOCENIX LLM cost ledger from Supabase.") from exc
+    except Exception:
+        return 0.0
 
 
-def _persist_usage(db, job_id: str, role: str, provider_attempts: list[dict[str, Any]] | None = None) -> None:
+def _provider_failure_text(db, job_id: str, exc: Exception | None = None) -> str:
+    parts: list[str] = [str(exc or "")]
     try:
-        row = db.table("agent_jobs").select("result").eq("id", job_id).single().execute().data
-        result = (row or {}).get("result") or {}
-        policy = ROLE_POLICIES.get(role, DEFAULT_POLICY)
-        result["llm_provider"] = _ACTIVE_PROVIDER
-        result["llm_model"] = _ACTIVE_MODEL
-        result["llm_usage"] = dict(_USAGE)
-        result["estimated_openai_metered_cost_usd"] = round(_estimated_cost_usd(), 6) if _ACTIVE_PROVIDER == "openai" else None
-        if provider_attempts is not None:
-            result["provider_attempts"] = provider_attempts
-            result["provider_failover_used"] = len(provider_attempts) > 1
-        result["cost_optimization"] = {
-            "vision": False, "message_compaction": True, "prompt_cache_friendly": True,
-            "flash_mode": bool(policy["flash_mode"]), "reasoning_effort": policy["reasoning_effort"],
-            "quality_planning_preserved": bool(policy["enable_planning"]),
-            "max_history_items": int(policy["max_history_items"]),
-            "max_clickable_elements_length": int(policy["max_clickable_elements_length"]),
-            "use_judge": bool(policy["use_judge"]),
-        }
+        row = db.table("agent_jobs").select("status,error,result").eq("id", job_id).single().execute().data or {}
+        parts.append(str(row.get("error") or ""))
+        result = row.get("result") or {}
+        parts.append(str(result.get("errors") or ""))
+        parts.append(str(result.get("final_result") or ""))
+    except Exception:
+        pass
+    return " ".join(parts)
+
+
+def _persist_router_metadata(db, job_id: str, task_type: str, attempts: list[dict[str, Any]], active: llm_router.ProviderSlot | None) -> None:
+    try:
+        row = db.table("agent_jobs").select("result").eq("id", job_id).single().execute().data or {}
+        result = row.get("result") or {}
+        result.update({
+            "llm_task_type": task_type,
+            "llm_provider": active.provider if active else None,
+            "llm_model": active.model if active else None,
+            "llm_key_slot": active.key_slot if active else None,
+            "provider_attempts": attempts,
+            "provider_failover_used": len(attempts) > 1,
+            "provider_failover_reason": attempts[-2].get("error_class") if len(attempts) > 1 else None,
+            "estimated_cost_usd": None,
+        })
         local_worker.update_job(db, job_id, result=result)
     except Exception:
         pass
@@ -222,126 +134,122 @@ _original_run_agent_job = local_worker.run_agent_job
 
 
 async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
+    global _ACTIVE_SLOT, _ACTIVE_TASK_TYPE
     job_id = str(job["id"])
     input_data = job.get("input") or {}
     role = str(input_data.get("agent_role") or "").strip().lower()
+    department_role = str(input_data.get("department_role") or "").strip().lower()
     scheduled = bool(input_data.get("scheduled"))
     pipeline_phase = str(input_data.get("pipeline_phase") or "").strip().lower()
     policy = ROLE_POLICIES.get(role, DEFAULT_POLICY)
 
     if bool(input_data.get("cost_gate_probe_only")):
         probe = await probe_linkedin_message_badge(db)
-        local_worker.update_job(db, job_id, status="completed", result={"probe": probe, "llm_skipped": True, "estimated_llm_cost_usd": 0.0})
+        local_worker.update_job(db, job_id, status="completed", result={"probe": probe, "llm_skipped": True, "estimated_cost_usd": 0.0})
         return
 
-    if role == "lead" and pipeline_phase != "outreach":
+    task_type = llm_router.task_type_for_role(role, department_role, pipeline_phase)
+    if task_type == llm_router.TASK_DETERMINISTIC:
         await lead_v3.run_deterministic_research(db, job)
         return
 
     if scheduled and role == "inbox":
         gate = await evaluate_inbox_gate(db)
         if gate.get("terminal_blocker"):
-            local_worker.update_job(db, job_id, status="failed", error="LinkedIn requires legitimate human verification.", result={"llm_skipped": True, "cost_gate": gate, "estimated_llm_cost_usd": 0.0})
+            local_worker.update_job(db, job_id, status="failed", error="LinkedIn requires legitimate human verification.", result={"llm_skipped": True, "cost_gate": gate, "estimated_cost_usd": 0.0})
             local_worker.add_event(db, job_id, "cost_gate.blocked", "Inbox gate found a LinkedIn verification blocker", gate)
             return
         if not gate.get("run_llm"):
-            local_worker.update_job(db, job_id, status="completed", result={"llm_skipped": True,"no_change": True,"cost_gate": gate,"llm_model": _ACTIVE_MODEL,"estimated_llm_cost_usd": 0.0})
+            local_worker.update_job(db, job_id, status="completed", result={"llm_skipped": True, "no_change": True, "cost_gate": gate, "estimated_cost_usd": 0.0})
             local_worker.add_event(db, job_id, "cost_gate.no_change", "No inbox AI call was needed", gate)
             return
 
-    month_cost = _monthly_cost(db)
-    if month_cost >= MONTHLY_LLM_BUDGET_USD:
-        local_worker.update_job(db, job_id, status="failed", error=f"Monthly LLM budget of ${MONTHLY_LLM_BUDGET_USD:.2f} reached.", result={"budget_blocked": True,"month_cost_usd": round(month_cost, 4),"monthly_budget_usd": MONTHLY_LLM_BUDGET_USD,"estimated_llm_cost_usd": 0.0})
-        local_worker.add_event(db, job_id, "cost_budget.blocked", "Monthly LLM budget reached")
-        return
-
     os.environ["LOCENIX_AGENT_ROLE"] = role
-    _reset_usage(float(policy["run_budget_usd"]))
     bounded_job = dict(job)
     bounded_job["max_steps"] = min(int(job.get("max_steps") or policy["max_steps"]), int(policy["max_steps"]))
 
-    requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
-    provider_chain = _configured_provider_chain()
-    if not provider_chain:
-        raise RuntimeError("BLOCKED_LLM_PROVIDER: no configured provider is available.")
-    if requested != "auto":
-        provider_chain = provider_chain[:1]
+    slots = llm_router.configured_slots(task_type)
+    if not slots:
+        raise RuntimeError("BLOCKED_LLM_PROVIDER: no configured provider slot is available")
+
+    openai_cost = _monthly_openai_cost(db)
+    if openai_cost >= MONTHLY_OPENAI_BUDGET_USD:
+        slots = [slot for slot in slots if slot.provider != "openai"]
+    if not slots:
+        raise RuntimeError("BLOCKED_LLM_PROVIDER: only OpenAI was configured and its monthly safety budget is exhausted")
 
     attempts: list[dict[str, Any]] = []
     last_exc: Exception | None = None
-    original_provider_setting = os.environ.get("LOCENIX_LLM_PROVIDER")
-    try:
-        for index, provider in enumerate(provider_chain):
-            os.environ["LOCENIX_LLM_PROVIDER"] = provider
-            _reset_usage(float(policy["run_budget_usd"]))
-            local_worker.update_job(db, job_id, status="running", error=None)
-            exc: Exception | None = None
-            try:
-                await _original_run_agent_job(db, bounded_job)
-            except Exception as caught:
-                exc = caught
-                last_exc = caught
+    successful_slot: llm_router.ProviderSlot | None = None
+    _ACTIVE_TASK_TYPE = task_type
 
-            failure_text = _provider_failure_text(db, job_id, exc)
-            try:
-                state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data or {}
-                status = str(state.get("status") or "")
-            except Exception:
-                status = "failed" if exc else "unknown"
+    for index, slot in enumerate(slots):
+        _ACTIVE_SLOT = slot
+        llm_router.activate_slot(slot)
+        local_worker.update_job(db, job_id, status="running", error=None)
+        exc: Exception | None = None
+        try:
+            await _original_run_agent_job(db, bounded_job)
+        except Exception as caught:
+            exc = caught
+            last_exc = caught
 
-            attempts.append({
-                "provider": provider,
-                "model": _ACTIVE_MODEL,
-                "status": status,
-                "failover_eligible": _should_failover(failure_text),
-            })
+        failure_text = _provider_failure_text(db, job_id, exc)
+        try:
+            state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data or {}
+            status = str(state.get("status") or "")
+        except Exception:
+            status = "failed" if exc else "unknown"
 
-            if exc is None and status == "completed":
-                break
+        failover_eligible = llm_router.should_failover(failure_text)
+        attempts.append({
+            "provider": slot.provider,
+            "model": slot.model,
+            "key_slot": slot.key_slot,
+            "status": status,
+            "error_class": llm_router.provider_health(failure_text) if status != "completed" else None,
+            "failover_eligible": failover_eligible,
+        })
 
-            has_next = index + 1 < len(provider_chain)
-            if not has_next or not _should_failover(failure_text):
-                if exc is not None:
-                    raise exc
-                break
+        if exc is None and status == "completed":
+            successful_slot = slot
+            break
 
-            next_provider = provider_chain[index + 1]
-            local_worker.add_event(
-                db, job_id, "llm.provider_failover",
-                f"LLM provider {provider} failed; retrying with {next_provider}.",
-                {"from": provider, "to": next_provider},
-            )
-            local_worker.update_job(
-                db, job_id, status="running", error=None,
-                result={"provider_failover_in_progress": True, "from": provider, "to": next_provider},
-            )
+        has_next = index + 1 < len(slots)
+        if not has_next or not failover_eligible:
+            if exc is not None:
+                raise exc
+            break
 
-        if last_exc is not None:
-            try:
-                state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data or {}
-                if str(state.get("status") or "") != "completed" and attempts and not attempts[-1]["failover_eligible"]:
-                    raise last_exc
-            except Exception:
-                pass
-    finally:
-        if original_provider_setting is None:
-            os.environ.pop("LOCENIX_LLM_PROVIDER", None)
-        else:
-            os.environ["LOCENIX_LLM_PROVIDER"] = original_provider_setting
-        _persist_usage(db, job_id, role, attempts)
-        if scheduled and role == "inbox":
-            try:
-                state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data
-                if (state or {}).get("status") == "completed":
-                    mark_inbox_llm_completed(db)
-            except Exception:
-                pass
+        # Only provider/infrastructure errors are retried. The worker never treats a
+        # merely incomplete LinkedIn action as a reason to replay the whole job.
+        next_slot = slots[index + 1]
+        local_worker.add_event(
+            db, job_id, "llm.provider_failover",
+            f"LLM provider slot {slot.key_slot} failed; retrying with {next_slot.key_slot}.",
+            {"from": slot.key_slot, "to": next_slot.key_slot, "error_class": llm_router.provider_health(failure_text)},
+        )
+        local_worker.update_job(db, job_id, status="running", error=None)
+
+    active = successful_slot or _ACTIVE_SLOT
+    _persist_router_metadata(db, job_id, task_type, attempts, active)
+
+    if successful_slot is None and last_exc is not None:
+        raise last_exc
+
+    if scheduled and role == "inbox":
+        try:
+            state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data
+            if (state or {}).get("status") == "completed":
+                mark_inbox_llm_completed(db)
+        except Exception:
+            pass
 
 
 local_worker.Agent = AirtableEnabledAgent
-local_worker.ChatOllama = openai_llm
+local_worker.ChatOllama = routed_llm
 local_worker.ensure_ollama = lambda: None
-local_worker.OLLAMA_MODEL = "auto-provider"
+local_worker.OLLAMA_MODEL = "central-llm-router"
 local_worker.run_agent_job = cost_optimized_run_agent_job
 local_worker.pack_profile = profile_patch.pack_profile
 local_worker.unpack_profile = profile_patch.unpack_profile
