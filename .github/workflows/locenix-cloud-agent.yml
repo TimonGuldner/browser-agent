@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           RESPONSE=$(curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode&order=priority.asc,created_at.asc&limit=1" \
+            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode&order=priority.desc,created_at.asc&limit=1" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
           if [[ "$RESPONSE" == "[]" ]]; then
             echo "has_work=false" >> "$GITHUB_OUTPUT"
