@@ -2,7 +2,7 @@
   "control": {
     "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
     "reports_to": "AGENT_0_LOCENIX_CEO",
-    "generated_at": "2026-09-13T05:54:40.800696+00:00",
+    "generated_at": "2026-09-13T05:57:08.604397+00:00",
     "control_status": "OUTSIDE_BUSINESS_HOURS",
     "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
     "targets": {
@@ -27,7 +27,7 @@
     "management_rule": "TARGET -> ACTUAL -> GAP -> ACTION -> RE-MEASURE. A healthy workflow is not sufficient evidence; funnel movement and executed work are required."
   },
   "department": {
-    "last_run_at": "2026-09-13T05:54:40.696594+00:00",
+    "last_run_at": "2026-09-13T05:57:08.474460+00:00",
     "department_status": "HEALTHY",
     "department_health": "HEALTHY",
     "leads": 61,
@@ -90,12 +90,12 @@
   },
   "execution": {
     "status": "outside_business_hours",
-    "checked_at": "2026-09-13T07:54:40.763366+02:00",
+    "checked_at": "2026-09-13T07:57:08.556732+02:00",
     "daily_targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
       "connection_requests": 5
     },
-    "learning_run_count": 1
+    "learning_run_count": 2
   }
 }

@@ -1,15 +1,15 @@
 {
   "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-  "last_run_at": "2026-09-13T05:54:38.141620+00:00",
+  "last_run_at": "2026-09-13T05:57:04.349032+00:00",
   "status": "OK",
-  "learning_run_count": 1,
+  "learning_run_count": 2,
   "people_evaluated": 61,
   "interactions_observed": 83,
   "run_reports_observed": 11,
   "query_attribution_count": 0,
   "learned_queries": 0,
   "learned_message_features": 6,
-  "recommended_query": "Geschäftsführer lokale Dienstleistungen",
+  "recommended_query": "Inhaber Handwerk",
   "exploration_share": 0.15,
   "errors": 0
 }

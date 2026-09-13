@@ -1,10 +1,10 @@
 {
   "status": "outside_business_hours",
-  "checked_at": "2026-09-13T07:54:40.763366+02:00",
+  "checked_at": "2026-09-13T07:57:08.556732+02:00",
   "daily_targets": {
     "qualified_leads_found": 10,
     "engagement_actions": 3,
     "connection_requests": 5
   },
-  "learning_run_count": 1
+  "learning_run_count": 2
 }
