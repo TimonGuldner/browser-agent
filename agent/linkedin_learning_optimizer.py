@@ -6,7 +6,6 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -59,6 +58,15 @@ FUNNEL_REWARD = {
 QUERY_MARKER = re.compile(r'Learning Query:\s*([^\n;]+)', re.I)
 VARIANT_MARKER = re.compile(r'Learning Variant:\s*([^\n;]+)', re.I)
 
+PREFERABLE_MESSAGE_FEATURES = {
+    'length_short', 'length_medium', 'question', 'no_question',
+    'check_cta', 'no_check_cta', 'specific_local_seo_problem',
+}
+AVOIDABLE_MESSAGE_FEATURES = {
+    'length_long', 'generic_topic', 'question', 'no_question',
+    'check_cta', 'no_check_cta',
+}
+
 
 def load(path: Path, default: Any):
     try:
@@ -70,7 +78,7 @@ def load(path: Path, default: Any):
 def get_json(url: str) -> Any:
     req = urllib.request.Request(
         url,
-        headers={'Authorization': f'Bearer {AIRTABLE_PAT}', 'User-Agent': 'locenix-linkedin-learning/1.0'},
+        headers={'Authorization': f'Bearer {AIRTABLE_PAT}', 'User-Agent': 'locenix-linkedin-learning/1.1'},
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read().decode('utf-8'))
@@ -196,7 +204,6 @@ def finalize(bucket: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]
 
 def raw_weight(avg_reward: float, samples: int) -> float:
     confidence = min(1.0, samples / 8.0)
-    # Bounded soft learning: evidence can move a strategy, but never dominate instantly.
     signal = math.tanh(avg_reward / 4.0)
     return max(0.65, min(1.5, 1.0 + 0.5 * confidence * signal))
 
@@ -257,17 +264,25 @@ def main() -> None:
             fresh = raw_weight(float(stats['avg_reward']), int(stats['samples']))
             query_weights[query] = smoothed_weight(float(prev_weights.get(query, 1.0)), fresh, int(stats['samples']))
 
-    ranked_queries = sorted(query_weights, key=lambda q: (-query_weights[q], -int(query_stats.get(q, {}).get('samples', 0)), q))
+    base_order = {query: i for i, query in enumerate(BASE_SEARCH_QUERIES)}
+    ranked_queries = sorted(
+        query_weights,
+        key=lambda q: (
+            -query_weights[q],
+            -int(query_stats.get(q, {}).get('samples', 0)),
+            base_order.get(q, len(BASE_SEARCH_QUERIES) + 100),
+            q,
+        ),
+    )
 
     preferred_features = []
     avoid_features = []
     for feat, stats in sorted(message_stats.items(), key=lambda kv: kv[1]['avg_reward'], reverse=True):
-        if stats['samples'] >= 5 and stats['avg_reward'] >= 1.5:
+        if feat in PREFERABLE_MESSAGE_FEATURES and stats['samples'] >= 5 and stats['avg_reward'] >= 1.5:
             preferred_features.append(feat)
-        if stats['samples'] >= 5 and stats['avg_reward'] < 0:
+        if feat in AVOIDABLE_MESSAGE_FEATURES and stats['samples'] >= 5 and stats['avg_reward'] < 0:
             avoid_features.append(feat)
 
-    # Learn useful time windows only from actual run-report outcomes; advisory, never a hard restriction.
     time_raw: dict[str, dict[str, float]] = {}
     for record in runs:
         f = fields(record)
@@ -314,6 +329,7 @@ def main() -> None:
             'new_linkedin_account': False,
             'autonomous_code_rewrite': False,
             'prompt_rewrite': False,
+            'generic_messaging_never_preferred': True,
         },
     }
 
