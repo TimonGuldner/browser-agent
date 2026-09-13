@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,15 @@ AIRTABLE_PAT = os.getenv("AIRTABLE_PAT", "").strip()
 PEOPLE_TABLE = "People"
 DEFAULT_SEARCH_QUERY = os.getenv("LOCENIX_LEAD_SEARCH_QUERY", "Inhaber Handwerk").strip()
 TARGET_NEW_PROFILES = 10
-MAX_VISIBLE_CANDIDATES = 40
+MAX_VISIBLE_CANDIDATES = 60
 LEARNING_CONFIG = Path("results/linkedin_learning_config.json")
+DEFAULT_QUERY_FALLBACKS = [
+    "Inhaber Handwerk",
+    "Geschäftsführer lokale Dienstleistungen",
+    "Inhaber Physiotherapie",
+    "Inhaber Kosmetikstudio",
+    "Inhaber Zahnarztpraxis",
+]
 
 
 def _canonical_sales_url(url: str) -> str:
@@ -58,8 +66,6 @@ def _learning_strategy(job_id: str, input_data: dict[str, Any]) -> tuple[str, st
         queries = [DEFAULT_SEARCH_QUERY]
     weights = cfg.get("query_weights") or {}
     exploration_share = max(0.0, min(0.30, float(cfg.get("exploration_share") or 0.15)))
-
-    # Deterministic per job/day so retries do not randomly change strategy.
     seed = f"{datetime.now(timezone.utc).date().isoformat()}:{job_id}"
     number = int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12], 16)
     ratio = (number % 10000) / 10000.0
@@ -74,6 +80,16 @@ def _learning_strategy(job_id: str, input_data: dict[str, Any]) -> tuple[str, st
     return query, variant, float(weights.get(query, 1.0))
 
 
+def _query_candidates(primary: str) -> list[str]:
+    cfg = _load_learning_config()
+    configured = [str(x).strip() for x in (cfg.get("recommended_queries") or []) if str(x).strip()]
+    out: list[str] = []
+    for q in [primary, *configured, *DEFAULT_QUERY_FALLBACKS]:
+        if q and q not in out:
+            out.append(q)
+    return out[:6]
+
+
 async def _existing_urls() -> set[str]:
     existing: set[str] = set()
     offset: str | None = None
@@ -84,8 +100,7 @@ async def _existing_urls() -> set[str]:
                 params.append(("offset", offset))
             r = await client.get(
                 f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{PEOPLE_TABLE}",
-                headers=_airtable_headers(),
-                params=params,
+                headers=_airtable_headers(), params=params,
             )
             r.raise_for_status()
             payload = r.json()
@@ -99,47 +114,31 @@ async def _existing_urls() -> set[str]:
     return existing
 
 
-async def _create_people(
-    candidates: list[dict[str, str]],
-    *,
-    search_query: str,
-    learning_variant: str,
-    query_weight: float,
-) -> list[str]:
+async def _create_people(candidates: list[dict[str, str]], *, search_query: str, learning_variant: str, query_weight: float) -> list[str]:
     if not candidates:
         return []
     created_ids: list[str] = []
     today = datetime.now(timezone.utc).date().isoformat()
     async with httpx.AsyncClient(timeout=30) as client:
         for start in range(0, len(candidates), 10):
-            chunk = candidates[start : start + 10]
+            chunk = candidates[start:start + 10]
             records = []
             for c in chunk:
                 notes = (
-                    f"Learning Query: {search_query}\n"
+                    f"Learning Query: {c.get('search_query') or search_query}\n"
                     f"Learning Variant: {learning_variant}\n"
                     f"Learning Query Weight: {query_weight:.3f}\n"
                     "Deterministic Playwright V3 research. Raw Sales Navigator card: "
                     + c.get("card_text", "")[:1200]
                 )
-                records.append(
-                    {
-                        "fields": {
-                            "Full Name": c["name"],
-                            "LinkedIn URL": c["url"],
-                            "First Seen": today,
-                            "Lead ID": _lead_id(c["url"]),
-                            "Contact Status": "RESEARCHED",
-                            "Connection Request Sent": False,
-                            "DM Status": "NOT_SENT",
-                            "Notes": notes,
-                        }
-                    }
-                )
+                records.append({"fields": {
+                    "Full Name": c["name"], "LinkedIn URL": c["url"], "First Seen": today,
+                    "Lead ID": _lead_id(c["url"]), "Contact Status": "RESEARCHED",
+                    "Connection Request Sent": False, "DM Status": "NOT_SENT", "Notes": notes,
+                }})
             r = await client.post(
                 f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{PEOPLE_TABLE}",
-                headers=_airtable_headers(),
-                json={"records": records, "typecast": False},
+                headers=_airtable_headers(), json={"records": records, "typecast": False},
             )
             r.raise_for_status()
             created_ids.extend(str(x.get("id")) for x in r.json().get("records", []) if x.get("id"))
@@ -147,9 +146,10 @@ async def _create_people(
 
 
 async def _extract_candidates(page) -> list[dict[str, str]]:
-    # Sales Navigator virtualizes results; gather, scroll, gather again without sending DOM snapshots to an LLM.
     found: dict[str, dict[str, str]] = {}
-    for _ in range(8):
+    previous_count = -1
+    stagnant = 0
+    for _ in range(12):
         anchors = page.locator('a[href*="/sales/lead/"]')
         count = min(await anchors.count(), MAX_VISIBLE_CANDIDATES)
         for i in range(count):
@@ -178,16 +178,74 @@ async def _extract_candidates(page) -> list[dict[str, str]]:
                 continue
         if len(found) >= MAX_VISIBLE_CANDIDATES:
             break
-        await page.mouse.wheel(0, 1400)
-        await page.wait_for_timeout(1200)
+        if len(found) == previous_count:
+            stagnant += 1
+        else:
+            stagnant = 0
+        previous_count = len(found)
+        if stagnant >= 3:
+            break
+        await page.mouse.wheel(0, 1800)
+        await page.wait_for_timeout(900)
     return list(found.values())
+
+
+async def _try_search_box(page, query: str) -> bool:
+    selectors = [
+        'input[placeholder*="keyword" i]',
+        'input[aria-label*="keyword" i]',
+        'input[placeholder*="Schlagwort" i]',
+        'input[aria-label*="Schlagwort" i]',
+        'main input[placeholder*="Search" i]',
+        'main input[aria-label*="Search" i]',
+        'main input[placeholder*="Suche" i]',
+        'main input[aria-label*="Suche" i]',
+    ]
+    for selector in selectors:
+        loc = page.locator(selector)
+        for i in range(min(await loc.count(), 5)):
+            box = loc.nth(i)
+            try:
+                if not await box.is_visible():
+                    continue
+                await box.click()
+                await box.fill(query)
+                await box.press("Enter")
+                await page.wait_for_timeout(2500)
+                if await page.locator('a[href*="/sales/lead/"]').count() > 0:
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+async def _load_search_results(page, query: str) -> bool:
+    # First try the actual Sales Navigator keyword field. Do not use the first generic text input.
+    if await _try_search_box(page, query):
+        return True
+
+    # Fallback: Sales Navigator accepts a keywords query parameter on the people-search route
+    # in current layouts. Verification is always the presence of lead result anchors.
+    encoded = urllib.parse.quote(query)
+    for url in (
+        f"https://www.linkedin.com/sales/search/people?keywords={encoded}",
+        f"https://www.linkedin.com/sales/search/people?query={encoded}",
+    ):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000)
+            if await page.locator('a[href*="/sales/lead/"]').count() > 0:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 async def run_deterministic_research(db, job: dict[str, Any]) -> None:
     job_id = str(job["id"])
     input_data = job.get("input") or {}
     target = max(1, min(int(input_data.get("target_new_profiles") or TARGET_NEW_PROFILES), 20))
-    search_query, learning_variant, query_weight = _learning_strategy(job_id, input_data)
+    primary_query, learning_variant, query_weight = _learning_strategy(job_id, input_data)
 
     if not local_worker.restore_profile(db):
         raise RuntimeError("No saved LinkedIn browser profile exists")
@@ -195,12 +253,12 @@ async def run_deterministic_research(db, job: dict[str, Any]) -> None:
     chromium = local_worker.find_chromium()
     existing = await _existing_urls()
     candidates: list[dict[str, str]] = []
+    seen: set[str] = set()
+    attempted_queries: list[str] = []
 
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
-            str(local_worker.PROFILE_DIR),
-            executable_path=chromium,
-            headless=True,
+            str(local_worker.PROFILE_DIR), executable_path=chromium, headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--password-store=basic"],
         )
         try:
@@ -210,56 +268,44 @@ async def run_deterministic_research(db, job: dict[str, Any]) -> None:
             if "/login" in page.url or "/checkpoint/" in page.url or "/authwall" in page.url:
                 raise RuntimeError("LinkedIn login/security checkpoint requires human action")
 
-            # Use the visible Sales Navigator search box when available. No LLM/browser-use step is needed.
-            boxes = page.locator('input[placeholder*="Search" i], input[aria-label*="Search" i], input[type="text"]')
-            box_count = await boxes.count()
-            if box_count:
-                box = boxes.first
-                try:
-                    await box.fill(search_query)
-                    await box.press("Enter")
-                    await page.wait_for_timeout(3000)
-                except Exception:
-                    pass
-
-            raw = await _extract_candidates(page)
-            seen: set[str] = set()
-            for c in raw:
-                url = _canonical_sales_url(c["url"])
-                if not url or url in existing or url in seen:
+            for query in _query_candidates(primary_query):
+                attempted_queries.append(query)
+                ok = await _load_search_results(page, query)
+                if not ok:
                     continue
-                seen.add(url)
-                c["url"] = url
-                candidates.append(c)
+                raw = await _extract_candidates(page)
+                for c in raw:
+                    url = _canonical_sales_url(c["url"])
+                    if not url or url in existing or url in seen:
+                        continue
+                    seen.add(url)
+                    c["url"] = url
+                    c["search_query"] = query
+                    candidates.append(c)
+                    if len(candidates) >= target:
+                        break
                 if len(candidates) >= target:
                     break
         finally:
             await context.close()
 
     created_ids = await _create_people(
-        candidates,
-        search_query=search_query,
-        learning_variant=learning_variant,
-        query_weight=query_weight,
+        candidates, search_query=primary_query, learning_variant=learning_variant, query_weight=query_weight,
     )
     result = {
-        "pipeline_phase": "research_v3",
-        "browser": "playwright-deterministic",
-        "search_query": search_query,
-        "learning_variant": learning_variant,
-        "learning_query_weight": round(query_weight, 3),
-        "learning_config_applied": LEARNING_CONFIG.exists(),
-        "target_new_profiles": target,
-        "candidates_found": len(candidates),
-        "airtable_records_created": len(created_ids),
-        "airtable_record_ids": created_ids,
-        "llm_skipped": True,
+        "pipeline_phase": "research_v3", "browser": "playwright-deterministic",
+        "search_query": primary_query, "attempted_queries": attempted_queries,
+        "learning_variant": learning_variant, "learning_query_weight": round(query_weight, 3),
+        "learning_config_applied": LEARNING_CONFIG.exists(), "target_new_profiles": target,
+        "candidates_found": len(candidates), "airtable_records_created": len(created_ids),
+        "airtable_record_ids": created_ids, "llm_skipped": True,
         "llm_usage": {"prompt_tokens": 0, "cached_prompt_tokens": 0, "completion_tokens": 0},
-        "estimated_llm_cost_usd": 0.0,
-        "outreach_sent": 0,
-        "next_phase": "outreach",
+        "estimated_llm_cost_usd": 0.0, "outreach_sent": 0, "next_phase": "outreach",
     }
     status = "completed" if len(created_ids) >= target else "failed"
-    error = None if status == "completed" else f"Deterministic research found/created {len(created_ids)} of target {target} new profiles."
+    error = None if status == "completed" else (
+        f"Deterministic research found/created {len(created_ids)} of target {target} new profiles "
+        f"after queries: {attempted_queries}."
+    )
     local_worker.update_job(db, job_id, status=status, result=result, error=error)
     local_worker.add_event(db, job_id, "lead.v3_research", "Deterministic Sales Navigator research finished", result)
