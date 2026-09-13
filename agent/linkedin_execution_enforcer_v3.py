@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import agent.linkedin_execution_enforcer as base
 import agent.linkedin_execution_enforcer_v2 as v2
@@ -9,9 +10,6 @@ import agent.linkedin_execution_enforcer_v2 as v2
 QUEUED_STALE_MINUTES = 30
 RUNNING_STALE_MINUTES = 30
 QUOTA_ROLES = {'lead', 'engagement', 'outreach', 'dm_outreach', 'inbox'}
-
-# One priority convention everywhere: larger number = earlier execution.
-# These are the binding daily LinkedIn targets requested by the CEO layer.
 HARD_DAILY_TARGETS = {
     'qualified_leads_found': 20,
     'engagement_actions': 3,
@@ -33,23 +31,15 @@ def _patch_job(job_id: str, payload: dict) -> None:
     import urllib.request
     req = urllib.request.Request(
         f'{base.SUPABASE_URL}/rest/v1/agent_jobs?id=eq.{job_id}',
-        data=json.dumps(payload).encode('utf-8'),
-        method='PATCH',
+        data=json.dumps(payload).encode('utf-8'), method='PATCH',
         headers={**base.supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
     )
     with urllib.request.urlopen(req, timeout=30):
         pass
 
 
-def _enqueue_high_priority(
-    role: str,
-    *,
-    department_role: str | None = None,
-    phase: str | None = None,
-    target: int | None = None,
-    priority_boost: int = 0,
-    task_suffix: str = '',
-) -> str:
+def _enqueue_high_priority(role: str, *, department_role: str | None = None, phase: str | None = None,
+                           target: int | None = None, priority_boost: int = 0, task_suffix: str = '') -> str:
     task, max_steps, priority = base.template(role)
     learned = base.learning_prompt(role)
     if learned:
@@ -69,16 +59,12 @@ def _enqueue_high_priority(
         inp['target_new_profiles'] = target
         inp['target_actions'] = target
     payload = {
-        'status': 'queued',
-        'task': task,
-        'mode': 'autonomous',
+        'status': 'queued', 'task': task, 'mode': 'autonomous',
         'priority': max(1, int(priority) + int(priority_boost)),
-        'max_steps': max_steps,
-        'input': inp,
+        'max_steps': max_steps, 'input': inp,
     }
     rows = base.post_json(
-        f'{base.SUPABASE_URL}/rest/v1/agent_jobs',
-        payload,
+        f'{base.SUPABASE_URL}/rest/v1/agent_jobs', payload,
         {**base.supabase_headers(), 'Prefer': 'return=representation'},
     )
     if not isinstance(rows, list) or not rows:
@@ -114,17 +100,89 @@ def recover_stale_quota_jobs() -> dict:
     return {'stale_recovered': recovered, 'healthy_active_jobs': healthy}
 
 
+def _enqueue_fixed(role: str, *, department_role: str | None = None, phase: str | None = None,
+                   target: int | None = None, priority_boost: int = 0, task_suffix: str = '') -> str:
+    dept = str(department_role or '').lower()
+    if dept == 'lead':
+        # Deterministic Playwright V3 is now repaired and must remain zero-LLM.
+        phase = 'research_v3'
+        task_suffix = v2.LEAD_RESEARCH_PROMPT
+    elif dept == 'engagement':
+        task_suffix = v2.ENGAGEMENT_PROMPT
+    elif dept == 'outreach':
+        task_suffix = v2.OUTREACH_PROMPT
+    elif dept == 'dm_outreach':
+        task_suffix = v2.DM_PROMPT
+    return _enqueue_high_priority(
+        role, department_role=department_role, phase=phase, target=target,
+        priority_boost=priority_boost, task_suffix=task_suffix,
+    )
+
+
+def _late_day_enforce() -> dict:
+    """Keep closing today's gaps after the legacy 20:00 business-hours cutoff.
+
+    The CEO may continue corrective work until 23:00 Berlin time. Safety/platform
+    gates inside the actual workers still have precedence.
+    """
+    metrics = v2.airtable_today_v2()
+    targets = {**HARD_DAILY_TARGETS, 'reply_actions': max(metrics['replies_received'], metrics['positive_replies'])}
+    gaps = base.gaps(metrics, targets)
+    jobs = base.existing_active_jobs()
+    active = base.active_department_roles(jobs)
+    created: list[dict[str, str]] = []
+
+    if gaps['reply_actions'] > 0 and 'inbox' not in active:
+        created.append({'role': 'inbox', 'job_id': _enqueue_fixed('inbox', department_role='inbox', priority_boost=30)})
+        active.add('inbox')
+    if gaps['qualified_leads_found'] > 0 and 'lead' not in active:
+        created.append({'role': 'lead', 'job_id': _enqueue_fixed(
+            'lead', department_role='lead', phase='research_v3', target=min(20, gaps['qualified_leads_found']), priority_boost=20)})
+        active.add('lead')
+    if gaps['connection_requests'] > 0 and 'outreach' not in active:
+        created.append({'role': 'outreach', 'job_id': _enqueue_fixed(
+            'growth', department_role='outreach', target=gaps['connection_requests'], priority_boost=15)})
+        active.add('outreach')
+    if gaps['direct_messages'] > 0 and 'dm_outreach' not in active:
+        created.append({'role': 'dm_outreach', 'job_id': _enqueue_fixed(
+            'growth', department_role='dm_outreach', target=gaps['direct_messages'], priority_boost=12)})
+        active.add('dm_outreach')
+    if gaps['engagement_actions'] > 0 and 'engagement' not in active:
+        created.append({'role': 'engagement', 'job_id': _enqueue_fixed(
+            'growth', department_role='engagement', target=gaps['engagement_actions'], priority_boost=10)})
+        active.add('engagement')
+
+    result = {
+        'status': 'late_day_enforcement',
+        'checked_at': datetime.now(ZoneInfo('Europe/Berlin')).isoformat(),
+        'daily_metrics': metrics, 'daily_targets': targets, 'gaps': gaps,
+        'created_jobs': created, 'active_roles_after_check': sorted(active),
+        'funnel_order': ['DISCOVERED','QUALIFIED','ENGAGE','ENGAGED','CONNECTION_READY','CONNECTION_SENT','CONNECTED','CONVERSATION_STARTED','INTERESTED','CHECK_OFFERED','CHECK_ACCEPTED','TRIAL','PAID'],
+    }
+    base.save(result)
+    return result
+
+
 def main() -> None:
     recovery = recover_stale_quota_jobs()
     print(json.dumps({'quota_recovery': recovery}, ensure_ascii=False))
-
-    # Inject corrected policy into the V2 evidence-based implementation.
     base.DAILY_TARGETS = dict(HARD_DAILY_TARGETS)
-    v2._original_enqueue = _enqueue_high_priority
 
-    # V2 re-measures real Airtable evidence after stale cleanup and creates only the
-    # still-missing executable quota jobs. It uses technically confirmed Interactions.
-    v2.main()
+    # Replace V2's legacy enqueue wrapper so lead recovery uses deterministic research
+    # and all escalation priorities follow the global larger-number-first invariant.
+    v2._original_enqueue = _enqueue_high_priority
+    v2.enqueue_v2 = _enqueue_fixed
+
+    hour = datetime.now(ZoneInfo('Europe/Berlin')).hour
+    if 8 <= hour < 20:
+        v2.main()
+    elif 20 <= hour < 23:
+        print(json.dumps(_late_day_enforce(), ensure_ascii=False))
+    else:
+        metrics = v2.airtable_today_v2()
+        result = {'status':'outside_corrective_window','daily_metrics':metrics,'daily_targets':HARD_DAILY_TARGETS,'checked_at':datetime.now(ZoneInfo('Europe/Berlin')).isoformat()}
+        base.save(result)
+        print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == '__main__':
