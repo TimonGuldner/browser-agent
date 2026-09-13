@@ -19,7 +19,7 @@ TASK_REPAIR_ANALYSIS = "repair_analysis"
 TASK_BROWSER_REASONING = "browser_reasoning"
 TASK_HIGH_REASONING = "high_reasoning"
 
-GOOGLE_DEFAULT_MODEL = os.getenv("GOOGLE_DEFAULT_MODEL", "gemini-2.5-flash").strip()
+GOOGLE_DEFAULT_MODEL = os.getenv("GOOGLE_DEFAULT_MODEL", "gemini-3.6-flash").strip()
 OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_DEFAULT_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-luna")).strip()
 ANTHROPIC_DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-6").strip()
 BROWSER_USE_DEFAULT_MODEL = os.getenv("BROWSER_USE_DEFAULT_MODEL", "bu-latest").strip()
@@ -39,7 +39,8 @@ _TRANSIENT_MARKERS = (
     "429", "rate limit", "rate_limit", "resource exhausted", "quota", "insufficient_quota",
     "credit_balance_exhausted", "billing", "timeout", "timed out", "502", "503", "504",
     "service unavailable", "overloaded", "capacity", "temporarily unavailable", "connection reset",
-    "model not found", "model_not_found", "provider unavailable", "llm request",
+    "404", "model not found", "model_not_found", "model unavailable", "not available", "no longer available",
+    "provider unavailable", "llm request",
 )
 _AUTH_MARKERS = ("401", "403", "authentication", "unauthorized", "forbidden", "invalid api key", "api key invalid")
 
@@ -101,6 +102,8 @@ def provider_health(error_text: str) -> str:
         return "quota_exhausted"
     if "429" in text or "rate limit" in text or "resource exhausted" in text:
         return "temporarily_limited"
+    if any(m in text for m in ("404", "model not found", "model unavailable", "not available", "no longer available")):
+        return "model_unavailable"
     if any(m in text for m in ("timeout", "502", "503", "504", "service unavailable", "overloaded", "capacity")):
         return "cooldown"
     return "unknown"
@@ -131,7 +134,7 @@ def task_type_for_role(role: str, department_role: str = "", pipeline_phase: str
 
 
 def activate_slot(slot: ProviderSlot) -> None:
-    # SDKs read canonical env vars. Do not log or persist values.
+    # SDKs read canonical env vars. Never log or persist secret values.
     if slot.provider == "google":
         os.environ["GOOGLE_API_KEY"] = slot.key
     elif slot.provider == "openai":
