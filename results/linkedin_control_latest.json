@@ -2,18 +2,22 @@
   "control": {
     "controller": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
     "reports_to": "AGENT_0_LOCENIX_CEO",
-    "generated_at": "2026-09-13T10:11:08.148964+00:00",
+    "generated_at": "2026-09-13T10:12:06.891952+00:00",
     "control_status": "WORKING",
     "north_star": "PAID_CUSTOMERS_FROM_LINKEDIN",
     "targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
-      "connection_requests": 5
+      "connection_requests": 5,
+      "direct_messages": 3,
+      "reply_actions": 0
     },
     "actual": {
       "qualified_leads_found": 0,
       "engagement_actions": 0,
       "connection_requests": 0,
+      "direct_messages": 0,
+      "reply_actions": 0,
       "replies_received": 0,
       "positive_replies": 0,
       "active_conversations": 0
@@ -21,23 +25,18 @@
     "gaps": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
-      "connection_requests": 5
+      "connection_requests": 5,
+      "direct_messages": 3,
+      "reply_actions": 0
     },
     "created_jobs": [
       {
-        "role": "lead",
-        "job_id": "afa11bf7-e8af-4461-a8bc-5596f3115328"
-      },
-      {
-        "role": "engagement",
-        "job_id": "81534b06-97cd-497b-a58a-8685157f15cf"
-      },
-      {
-        "role": "outreach",
-        "job_id": "f492f47d-b1fa-4d15-bba1-7ad383abc55f"
+        "role": "dm_outreach",
+        "job_id": "25c4ab2f-5ff5-42af-8b30-665b94da6149"
       }
     ],
     "active_roles": [
+      "dm_outreach",
       "engagement",
       "lead",
       "outreach"
@@ -69,7 +68,7 @@
     "management_rule": "TARGET -> ACTUAL -> GAP -> ACTION -> RE-MEASURE. A healthy workflow is not sufficient evidence; funnel movement and executed work are required."
   },
   "department": {
-    "last_run_at": "2026-09-13T10:11:05.851889+00:00",
+    "last_run_at": "2026-09-13T10:12:04.978195+00:00",
     "department_status": "HEALTHY",
     "department_health": "HEALTHY",
     "leads": 61,
@@ -85,7 +84,7 @@
     "paid_customers": 0,
     "queue_backlog": 8,
     "failed_jobs": 0,
-    "queued_jobs": 0,
+    "queued_jobs": 3,
     "account_risk": false,
     "agent_health": {
       "Inbox": "UNKNOWN",
@@ -132,11 +131,13 @@
   },
   "execution": {
     "status": "ok",
-    "checked_at": "2026-09-13T12:11:05.938019+02:00",
+    "checked_at": "2026-09-13T12:12:05.046408+02:00",
     "daily_metrics": {
       "qualified_leads_found": 0,
       "engagement_actions": 0,
       "connection_requests": 0,
+      "direct_messages": 0,
+      "reply_actions": 0,
       "replies_received": 0,
       "positive_replies": 0,
       "active_conversations": 0
@@ -144,35 +145,32 @@
     "daily_targets": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
-      "connection_requests": 5
+      "connection_requests": 5,
+      "direct_messages": 3,
+      "reply_actions": 0
     },
     "gaps": {
       "qualified_leads_found": 10,
       "engagement_actions": 3,
-      "connection_requests": 5
+      "connection_requests": 5,
+      "direct_messages": 3,
+      "reply_actions": 0
     },
     "created_jobs": [
       {
-        "role": "lead",
-        "job_id": "afa11bf7-e8af-4461-a8bc-5596f3115328"
-      },
-      {
-        "role": "engagement",
-        "job_id": "81534b06-97cd-497b-a58a-8685157f15cf"
-      },
-      {
-        "role": "outreach",
-        "job_id": "f492f47d-b1fa-4d15-bba1-7ad383abc55f"
+        "role": "dm_outreach",
+        "job_id": "25c4ab2f-5ff5-42af-8b30-665b94da6149"
       }
     ],
     "active_roles_after_check": [
+      "dm_outreach",
       "engagement",
       "lead",
       "outreach"
     ],
     "learning": {
       "enabled": true,
-      "learning_run_count": 3,
+      "learning_run_count": 4,
       "recommended_queries": [
         "Inhaber Handwerk",
         "Geschäftsführer lokale Dienstleistungen",
@@ -200,6 +198,6 @@
       "TRIAL",
       "PAID"
     ],
-    "rule": "Agent 8 must close observed funnel gaps with role-specific executable work; one person may have only one operational owner and all CRM/safety guardrails remain binding. Learning may reprioritize tactics but never increase safety or outreach limits."
+    "rule": "Agent 8 must close observed daily LinkedIn gaps for qualified leads, comments, connection requests, individual DMs and same-day replies with executable work. One person may have only one operational owner and all CRM, approval and safety guardrails remain binding."
   }
 }
