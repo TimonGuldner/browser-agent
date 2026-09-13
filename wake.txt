@@ -4,4 +4,4 @@ Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
 Central LLM router is enabled with Gemini-first task routing, multi-key provider pools and safe failover.
 Deterministic lead research remains zero-LLM.
-Wake: 2026-09-13 21:xx Europe/Berlin — production verify router self-tests, live Gemini inference, Agent 0 analysis and remaining LinkedIn KPI execution.
+Wake: 2026-09-13 21:31 Europe/Berlin — verify Gemini 3.6 Flash, Agent 0 routed analysis and remaining LinkedIn KPI execution.
