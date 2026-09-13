@@ -51,7 +51,7 @@ jobs:
             echo "Airtable is not connected. Scheduled CRM jobs fail closed."
           fi
           if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "OpenAI API is not connected yet. Zero-LLM supervisor/login can still work; AI jobs and LLM repair fail closed."
+            echo "OpenAI API is not connected. Zero-LLM supervisor/research can still work; AI jobs fail closed."
           fi
 
       - name: Checkout
@@ -74,14 +74,7 @@ jobs:
       - name: Run LOCENIX deterministic supervisor
         if: steps.config.outputs.ready == 'true'
         shell: bash
-        run: |
-          python -m agent.supervisor
-
-      - name: Run LLM repair agent when needed
-        if: steps.config.outputs.ready == 'true' && env.OPENAI_API_KEY != ''
-        shell: bash
-        run: |
-          python -m agent.repair_agent
+        run: python -m agent.supervisor
 
       - name: Enqueue due Supabase schedules
         if: steps.config.outputs.ready == 'true'
@@ -100,7 +93,7 @@ jobs:
         shell: bash
         run: |
           RESPONSE=$(curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode&order=priority.desc,created_at.asc&limit=1" \
+            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode,priority&order=priority.desc,created_at.asc&limit=1" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
           if [[ "$RESPONSE" == "[]" ]]; then
             echo "has_work=false" >> "$GITHUB_OUTPUT"
@@ -114,14 +107,13 @@ jobs:
             else
               echo "needs_login=false" >> "$GITHUB_OUTPUT"
             fi
-            echo "Queued LOCENIX work found."
+            echo "Queued LOCENIX work found (highest priority first)."
           fi
 
       - name: Install Chromium
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         shell: bash
-        run: |
-          python -m playwright install --with-deps chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Install remote login tools only when needed
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true' && steps.queue.outputs.needs_login == 'true'
@@ -142,3 +134,9 @@ jobs:
           for n in 1 2 3 4 5 6; do
             python -m agent.airtable_worker --once
           done
+
+      - name: Run LLM repair agent after operational queue
+        if: always() && steps.config.outputs.ready == 'true' && env.OPENAI_API_KEY != ''
+        continue-on-error: true
+        shell: bash
+        run: python -m agent.repair_agent
