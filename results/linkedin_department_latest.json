@@ -1,7 +1,7 @@
 {
   "agent": "AGENT_8_LINKEDIN_DEPARTMENT_HEAD",
   "reports_to": "AGENT_0_LOCENIX_CEO",
-  "last_run_at": "2026-09-13T10:51:08.615915+00:00",
+  "last_run_at": "2026-09-13T10:51:29.984162+00:00",
   "department_status": "ATTENTION",
   "department_health": "ATTENTION",
   "leads": 61,
@@ -17,7 +17,7 @@
   "paid_customers": 0,
   "queue_backlog": 8,
   "failed_jobs": 3,
-  "queued_jobs": 1,
+  "queued_jobs": 5,
   "account_risk": false,
   "agent_health": {
     "Inbox": "UNKNOWN",
