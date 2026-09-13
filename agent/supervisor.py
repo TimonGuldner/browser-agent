@@ -72,16 +72,14 @@ def _current_task(db: Client, role: str, fallback: str) -> tuple[str, int, int]:
         .data
     )
     if not row or not row.get("enabled", True):
-        return fallback, 40, 100
+        return fallback, 40, 50
     adapter = str(row.get("runtime_adapter") or "").strip()
     prompt = str(row.get("prompt") or "").strip()
     task = "\n\n".join(x for x in (adapter, prompt) if x) or fallback
-    return task, int(row.get("max_steps") or 40), int(row.get("priority") or 100)
+    return task, int(row.get("max_steps") or 40), int(row.get("priority") or 50)
 
 
 def _has_child_retry(db: Client, job_id: str) -> bool:
-    # Any prior child retry counts, including failed/cancelled children. This prevents the
-    # same parent job from spawning a fresh retry every 10 minutes forever.
     rows = (
         db.table("agent_jobs")
         .select("id,input,status")
@@ -108,21 +106,23 @@ def _retry_job(db: Client, job: dict[str, Any]) -> str | None:
         return None
 
     role = str(input_data.get("agent_role") or "").strip().lower()
-    if role not in {"inbox", "growth", "lead", "content"}:
+    if role not in {"inbox", "growth", "lead", "content", "outreach"}:
         return None
 
-    task, max_steps, priority = _current_task(db, role, str(job.get("task") or ""))
+    task, max_steps, template_priority = _current_task(db, role, str(job.get("task") or ""))
     new_input = dict(input_data)
     new_input["source"] = "supervisor-retry"
     new_input["retry_of"] = job_id
     new_input["supervisor_retry_count"] = retry_count + 1
     new_input["scheduled"] = False
     if role == "lead":
-        new_input["target_new_profiles"] = 10
-        # Lead retries default to the zero-LLM deterministic research path unless they
-        # explicitly came from the short outreach phase.
+        new_input["target_new_profiles"] = int(input_data.get("target_new_profiles") or 10)
         if str(input_data.get("pipeline_phase") or "").lower() != "outreach":
             new_input["pipeline_phase"] = "research_v3"
+
+    # System-wide invariant: larger priority number means earlier execution.
+    # A retry must never be demoted below either its parent job or its current template.
+    retry_priority = max(int(job.get("priority") or 0), template_priority)
 
     created = (
         db.table("agent_jobs")
@@ -131,7 +131,7 @@ def _retry_job(db: Client, job: dict[str, Any]) -> str | None:
                 "status": "queued",
                 "task": task,
                 "mode": str(job.get("mode") or "autonomous"),
-                "priority": min(int(job.get("priority") or priority), priority),
+                "priority": retry_priority,
                 "max_steps": max_steps,
                 "input": new_input,
             }
@@ -147,7 +147,7 @@ def _retry_job(db: Client, job: dict[str, Any]) -> str | None:
             "job_id": new_id,
             "event_type": "supervisor.retry_created",
             "message": f"Supervisor retried failed {role} job {job_id}",
-            "data": {"retry_of": job_id, "retry_count": retry_count + 1},
+            "data": {"retry_of": job_id, "retry_count": retry_count + 1, "priority": retry_priority},
         }
     ).execute()
     return new_id
