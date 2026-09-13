@@ -90,6 +90,7 @@ jobs:
         shell: bash
         run: |
           python -m compileall -q agent
+          python -m agent.llm_router_selftest
           python - <<'PY'
           from agent import llm_router
           import json
@@ -98,6 +99,18 @@ jobs:
               'repair_analysis': llm_router.router_status(llm_router.TASK_REPAIR_ANALYSIS),
               'deterministic': llm_router.router_status(llm_router.TASK_DETERMINISTIC),
           }))
+          PY
+
+      - name: Live Gemini router smoke test
+        if: steps.config.outputs.ready == 'true' && env.GOOGLE_API_KEY != ''
+        shell: bash
+        run: |
+          python - <<'PY'
+          from agent import llm_router
+          text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=32)
+          print({'text': text.strip()[:50], 'provider': meta.get('provider'), 'model': meta.get('model'), 'key_slot': meta.get('key_slot'), 'failover': meta.get('provider_failover_used')})
+          if meta.get('provider') != 'google':
+              raise SystemExit('Gemini smoke test unexpectedly did not use Google')
           PY
 
       - name: Run Agent 0 CEO measurement and objective sync
