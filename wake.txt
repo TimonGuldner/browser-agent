@@ -2,4 +2,4 @@ LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
 Hybrid supervisor enabled: deterministic checks every 10 minutes plus GPT-5.6 Luna repair for unknown errors or after two failed retries.
 Hard daily LinkedIn quota jobs queued by Agent 8 must be processed now.
-Wake: 2026-09-13 12:52 Europe/Berlin — process lead, engagement, connection-request and DM quota jobs.
+Wake: 2026-09-13 19:58 Europe/Berlin — process CEO-priority LinkedIn lead, connection-request, DM and engagement quota jobs immediately.
