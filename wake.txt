@@ -4,4 +4,4 @@ Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
 Central LLM router is enabled with Gemini-first task routing, multi-key provider pools and safe failover.
 Deterministic lead research remains zero-LLM.
-Wake: 2026-09-13 22:00 Europe/Berlin — run Agent 0 closed-loop recovery for remaining daily KPI gaps: connections, meaningful DMs/follow-ups, strategic comments, and approved unique email sends. Re-measure after execution; only technically confirmed actions count.
+Wake: 2026-09-13 22:35 Europe/Berlin — test new Gemini cross-model failover pool, continue Agent 0 closed-loop recovery for remaining daily KPI gaps, and only count technically confirmed external actions.
