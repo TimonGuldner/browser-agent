@@ -10,6 +10,9 @@ on:
       - 'agent/linkedin_department_head.py'
       - 'agent/linkedin_execution_enforcer.py'
       - 'agent/linkedin_department_control.py'
+      - 'agent/linkedin_learning_optimizer.py'
+      - 'agent/lead_v3.py'
+      - '.github/workflows/linkedin-department-head.yml'
   schedule:
     - cron: '20 6-18 * * *'
 
@@ -54,6 +57,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Run LinkedIn Learning Optimizer Agent 8L
+        if: steps.gate.outputs.run_review == 'true'
+        run: python -m agent.linkedin_learning_optimizer
+
       - name: Run LinkedIn Department Head Agent 8
         if: steps.gate.outputs.run_review == 'true'
         run: python -m agent.linkedin_department_head
@@ -71,11 +78,11 @@ jobs:
         run: |
           git config user.name 'locenix-linkedin-department-head'
           git config user.email 'actions@users.noreply.github.com'
-          git add results/linkedin_department_latest.json results/linkedin_department_state.json results/linkedin_execution_state.json results/linkedin_control_state.json results/linkedin_control_latest.json
+          git add results/linkedin_department_latest.json results/linkedin_department_state.json results/linkedin_execution_state.json results/linkedin_control_state.json results/linkedin_control_latest.json results/linkedin_learning_config.json results/linkedin_learning_state.json results/linkedin_learning_latest.json
           if git diff --cached --quiet; then
             echo 'No department report changes'
           else
-            git commit -m 'Update LinkedIn department management, execution and control report'
+            git commit -m 'Update LinkedIn department learning and management report'
             git pull --rebase
             git push
           fi
