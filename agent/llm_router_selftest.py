@@ -19,14 +19,15 @@ def run() -> dict:
         os.environ["ANTHROPIC_API_KEY"] = ""
         os.environ["BROWSER_USE_API_KEY"] = ""
         os.environ["LOCENIX_LLM_PROVIDER"] = "auto"
+        os.environ["GOOGLE_LITE_MODELS"] = "gemini-2.5-flash-lite"
+        os.environ["GOOGLE_FLASH_MODELS"] = "gemini-3.6-flash"
         slots = llm_router.configured_slots(llm_router.TASK_PERSONALIZATION)
         assert slots[0].provider == "google", slots
-        assert slots[0].model == "gemini-3.5-flash-lite", slots[0]
+        assert slots[0].model == "gemini-2.5-flash-lite", slots[0]
         assert slots[1].provider == "google", slots
-        assert slots[1].model == "gemini-3.5-flash-lite", slots[1]
+        assert slots[1].model == "gemini-2.5-flash-lite", slots[1]
         models = [s.model for s in slots if s.provider == "google"]
-        assert "gemini-3.1-flash-lite" in models, models
-        assert "gemini-3.5-flash" in models, models
+        assert "gemini-2.5-flash-lite" in models, models
         assert "gemini-3.6-flash" in models, models
         assert llm_router.task_type_for_role("lead", "lead", "research_v3") == llm_router.TASK_DETERMINISTIC
         assert llm_router.task_type_for_role("growth", "dm_outreach", "") == llm_router.TASK_PERSONALIZATION
