@@ -2,6 +2,6 @@ LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
 Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
-Late-day corrective enforcement remains active until 23:00 Europe/Berlin while gaps remain.
-Email quota sender and optional Browser Use/Google/Anthropic provider fallback are wired.
-Wake: 2026-09-13 20:41 Europe/Berlin — verify provider failover OpenAI -> Gemini on remaining LinkedIn KPI gaps.
+Central LLM router is enabled with Gemini-first task routing, multi-key provider pools and safe failover.
+Deterministic lead research remains zero-LLM.
+Wake: 2026-09-13 21:xx Europe/Berlin — production verify router self-tests, live Gemini inference, Agent 0 analysis and remaining LinkedIn KPI execution.
