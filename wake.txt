@@ -3,4 +3,5 @@ Updating this file triggers the GitHub Actions runner.
 Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
 Late-day corrective enforcement remains active until 23:00 Europe/Berlin while gaps remain.
-Wake: 2026-09-13 current audit — verify CEO -> Agent 8 -> queue -> worker -> re-measurement end to end.
+Email quota sender and optional Browser Use/Google/Anthropic provider fallback are wired.
+Wake: 2026-09-13 final audit — verify current production code end to end.
