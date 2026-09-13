@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -17,6 +19,7 @@ PEOPLE_TABLE = "People"
 DEFAULT_SEARCH_QUERY = os.getenv("LOCENIX_LEAD_SEARCH_QUERY", "Inhaber Handwerk").strip()
 TARGET_NEW_PROFILES = 10
 MAX_VISIBLE_CANDIDATES = 40
+LEARNING_CONFIG = Path("results/linkedin_learning_config.json")
 
 
 def _canonical_sales_url(url: str) -> str:
@@ -35,6 +38,40 @@ def _airtable_headers() -> dict[str, str]:
     if not AIRTABLE_PAT:
         raise RuntimeError("AIRTABLE_PAT is not configured")
     return {"Authorization": f"Bearer {AIRTABLE_PAT}", "Content-Type": "application/json"}
+
+
+def _load_learning_config() -> dict[str, Any]:
+    try:
+        return json.loads(LEARNING_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _learning_strategy(job_id: str, input_data: dict[str, Any]) -> tuple[str, str, float]:
+    explicit = str(input_data.get("search_query") or "").strip()
+    if explicit:
+        return explicit, "explicit", 1.0
+
+    cfg = _load_learning_config()
+    queries = [str(x).strip() for x in (cfg.get("recommended_queries") or []) if str(x).strip()]
+    if not queries:
+        queries = [DEFAULT_SEARCH_QUERY]
+    weights = cfg.get("query_weights") or {}
+    exploration_share = max(0.0, min(0.30, float(cfg.get("exploration_share") or 0.15)))
+
+    # Deterministic per job/day so retries do not randomly change strategy.
+    seed = f"{datetime.now(timezone.utc).date().isoformat()}:{job_id}"
+    number = int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12], 16)
+    ratio = (number % 10000) / 10000.0
+
+    if len(queries) > 1 and ratio < exploration_share:
+        index = 1 + (number % (len(queries) - 1))
+        query = queries[index]
+        variant = "explore"
+    else:
+        query = max(queries, key=lambda q: (float(weights.get(q, 1.0)), -queries.index(q)))
+        variant = "exploit"
+    return query, variant, float(weights.get(query, 1.0))
 
 
 async def _existing_urls() -> set[str]:
@@ -62,7 +99,13 @@ async def _existing_urls() -> set[str]:
     return existing
 
 
-async def _create_people(candidates: list[dict[str, str]]) -> list[str]:
+async def _create_people(
+    candidates: list[dict[str, str]],
+    *,
+    search_query: str,
+    learning_variant: str,
+    query_weight: float,
+) -> list[str]:
     if not candidates:
         return []
     created_ids: list[str] = []
@@ -72,7 +115,13 @@ async def _create_people(candidates: list[dict[str, str]]) -> list[str]:
             chunk = candidates[start : start + 10]
             records = []
             for c in chunk:
-                notes = "Deterministic Playwright V3 research. Raw Sales Navigator card: " + c.get("card_text", "")[:1200]
+                notes = (
+                    f"Learning Query: {search_query}\n"
+                    f"Learning Variant: {learning_variant}\n"
+                    f"Learning Query Weight: {query_weight:.3f}\n"
+                    "Deterministic Playwright V3 research. Raw Sales Navigator card: "
+                    + c.get("card_text", "")[:1200]
+                )
                 records.append(
                     {
                         "fields": {
@@ -138,7 +187,7 @@ async def run_deterministic_research(db, job: dict[str, Any]) -> None:
     job_id = str(job["id"])
     input_data = job.get("input") or {}
     target = max(1, min(int(input_data.get("target_new_profiles") or TARGET_NEW_PROFILES), 20))
-    search_query = str(input_data.get("search_query") or DEFAULT_SEARCH_QUERY).strip()
+    search_query, learning_variant, query_weight = _learning_strategy(job_id, input_data)
 
     if not local_worker.restore_profile(db):
         raise RuntimeError("No saved LinkedIn browser profile exists")
@@ -187,11 +236,19 @@ async def run_deterministic_research(db, job: dict[str, Any]) -> None:
         finally:
             await context.close()
 
-    created_ids = await _create_people(candidates)
+    created_ids = await _create_people(
+        candidates,
+        search_query=search_query,
+        learning_variant=learning_variant,
+        query_weight=query_weight,
+    )
     result = {
         "pipeline_phase": "research_v3",
         "browser": "playwright-deterministic",
         "search_query": search_query,
+        "learning_variant": learning_variant,
+        "learning_query_weight": round(query_weight, 3),
+        "learning_config_applied": LEARNING_CONFIG.exists(),
         "target_new_profiles": target,
         "candidates_found": len(candidates),
         "airtable_records_created": len(created_ids),
