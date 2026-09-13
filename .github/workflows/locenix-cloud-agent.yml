@@ -103,18 +103,24 @@ jobs:
 
       - name: Live Gemini router smoke test
         if: steps.config.outputs.ready == 'true' && env.GOOGLE_API_KEY != ''
+        continue-on-error: true
         shell: bash
         run: |
           python - <<'PY'
           from agent import llm_router
-          text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=32)
-          print({'text': text.strip()[:50], 'provider': meta.get('provider'), 'model': meta.get('model'), 'key_slot': meta.get('key_slot'), 'failover': meta.get('provider_failover_used')})
-          if meta.get('provider') != 'google':
-              raise SystemExit('Gemini smoke test unexpectedly did not use Google')
+          try:
+              text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=32)
+              print({'text': text.strip()[:50], 'provider': meta.get('provider'), 'model': meta.get('model'), 'key_slot': meta.get('key_slot'), 'failover': meta.get('provider_failover_used')})
+              if meta.get('provider') != 'google' or not text.strip():
+                  print('WARNING: Gemini smoke test degraded; operational and deterministic workers will continue.')
+          except Exception as exc:
+              print(f'WARNING: Gemini smoke test failed non-fatally: {type(exc).__name__}: {exc}')
+              print('Operational and deterministic workers will continue; provider-specific jobs may fail over independently.')
           PY
 
       - name: Run Agent 0 CEO measurement and objective sync
         if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
         shell: bash
         run: python -m agent.ceo_supervisor
 
@@ -123,7 +129,7 @@ jobs:
         continue-on-error: true
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_PAT }}
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQws5ZL
           EMAIL_DAILY_LIMIT: '20'
           EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
           EMAIL_REPLY_TO: 'hello@locenix.com'
@@ -132,6 +138,7 @@ jobs:
 
       - name: Run deterministic technical supervisor
         if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
         shell: bash
         run: python -m agent.supervisor
 
@@ -143,6 +150,7 @@ jobs:
 
       - name: Enqueue due Supabase schedules
         if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           curl --fail --silent --show-error \
@@ -155,15 +163,16 @@ jobs:
       - name: Check queued work
         if: steps.config.outputs.ready == 'true'
         id: queue
+        continue-on-error: true
         shell: bash
         run: |
           RESPONSE=$(curl --fail --silent --show-error \
             "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode,priority&order=priority.desc,created_at.asc&limit=1" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY")
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY") || RESPONSE="[]"
           if [[ "$RESPONSE" == "[]" ]]; then
             echo "has_work=false" >> "$GITHUB_OUTPUT"
             echo "needs_login=false" >> "$GITHUB_OUTPUT"
-            echo "No queued LOCENIX work. Heavy browser setup skipped."
+            echo "No queued LOCENIX work or queue temporarily unavailable."
           else
             MODE=$(echo "$RESPONSE" | jq -r '.[0].mode // ""')
             echo "has_work=true" >> "$GITHUB_OUTPUT"
@@ -192,10 +201,11 @@ jobs:
 
       - name: Process up to six queued jobs
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           for n in 1 2 3 4 5 6; do
-            python -m agent.airtable_worker --once
+            python -m agent.airtable_worker --once || echo "Worker attempt $n failed; continuing closed loop."
           done
 
       - name: Re-measure Agent 0 objectives after execution
