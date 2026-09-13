@@ -1,23 +1,23 @@
 {
   "state": {
     "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-    "last_run_at": "2026-09-13T18:14:27.885992+00:00",
+    "last_run_at": "2026-09-13T18:37:49.211176+00:00",
     "status": "OK",
-    "learning_run_count": 10,
-    "people_evaluated": 66,
+    "learning_run_count": 11,
+    "people_evaluated": 81,
     "interactions_observed": 85,
     "run_reports_observed": 11,
-    "query_attribution_count": 0,
-    "learned_queries": 0,
+    "query_attribution_count": 15,
+    "learned_queries": 4,
     "learned_message_features": 6,
-    "recommended_query": "Inhaber Handwerk",
+    "recommended_query": "Inhaber Physiotherapie",
     "exploration_share": 0.15,
     "errors": 0
   },
   "learning": {
     "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-    "generated_at": "2026-09-13T18:14:27.885992+00:00",
-    "learning_run_count": 10,
+    "generated_at": "2026-09-13T18:37:49.211176+00:00",
+    "learning_run_count": 11,
     "mode": "SAFE_OUTCOME_LEARNING",
     "principle": "Learn priorities from measured LinkedIn/Airtable outcomes; never rewrite executable code or bypass safety rules.",
     "exploration_share": 0.15,
@@ -33,11 +33,11 @@
       "Inhaber Elektriker": 1.0
     },
     "recommended_queries": [
-      "Inhaber Handwerk",
-      "Geschäftsführer lokale Dienstleistungen",
       "Inhaber Physiotherapie",
       "Inhaber Kosmetikstudio",
       "Inhaber Autowerkstatt",
+      "Geschäftsführer lokale Dienstleistungen",
+      "Inhaber Handwerk",
       "Inhaber Gebäudereinigung",
       "Inhaber Dachdecker",
       "Inhaber Elektriker"
@@ -56,10 +56,10 @@
         "negative_rate": 0.0
       },
       "owner_founder": {
-        "samples": 29,
+        "samples": 44,
         "reward": 10.5,
-        "avg_reward": 0.362,
-        "positive_rate": 0.103,
+        "avg_reward": 0.239,
+        "positive_rate": 0.068,
         "negative_rate": 0.0
       },
       "other": {
@@ -100,10 +100,10 @@
         "negative_rate": 0.0
       },
       "LinkedIn Search": {
-        "samples": 59,
+        "samples": 74,
         "reward": 18.5,
-        "avg_reward": 0.314,
-        "positive_rate": 0.068,
+        "avg_reward": 0.25,
+        "positive_rate": 0.054,
         "negative_rate": 0.0
       },
       "Comment Section": {
@@ -158,8 +158,45 @@
         "negative_rate": 0.0
       }
     },
-    "variant_stats": {},
-    "query_stats": {},
+    "variant_stats": {
+      "exploit": {
+        "samples": 15,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      }
+    },
+    "query_stats": {
+      "Inhaber Kosmetikstudio": {
+        "samples": 5,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "Inhaber Autowerkstatt": {
+        "samples": 4,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "Inhaber Physiotherapie": {
+        "samples": 5,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      },
+      "Geschäftsführer lokale Dienstleistungen": {
+        "samples": 1,
+        "reward": 0.0,
+        "avg_reward": 0.0,
+        "positive_rate": 0.0,
+        "negative_rate": 0.0
+      }
+    },
     "guardrails": {
       "do_not_contact_never_overridden": true,
       "daily_contact_limits_never_increased": true,

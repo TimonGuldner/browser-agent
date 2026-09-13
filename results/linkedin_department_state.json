@@ -1,8 +1,8 @@
 {
-  "last_run_at": "2026-09-13T18:14:31.781770+00:00",
+  "last_run_at": "2026-09-13T18:37:53.187752+00:00",
   "department_status": "ATTENTION",
   "department_health": "ATTENTION",
-  "leads": 66,
+  "leads": 81,
   "qualified_leads": 15,
   "active_conversations": 4,
   "replies": 2,
@@ -14,7 +14,7 @@
   "trials": 0,
   "paid_customers": 0,
   "queue_backlog": 8,
-  "failed_jobs": 21,
+  "failed_jobs": 27,
   "queued_jobs": 0,
   "account_risk": false,
   "agent_health": {

@@ -1,15 +1,15 @@
 {
   "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-  "last_run_at": "2026-09-13T18:14:27.885992+00:00",
+  "last_run_at": "2026-09-13T18:37:49.211176+00:00",
   "status": "OK",
-  "learning_run_count": 10,
-  "people_evaluated": 66,
+  "learning_run_count": 11,
+  "people_evaluated": 81,
   "interactions_observed": 85,
   "run_reports_observed": 11,
-  "query_attribution_count": 0,
-  "learned_queries": 0,
+  "query_attribution_count": 15,
+  "learned_queries": 4,
   "learned_message_features": 6,
-  "recommended_query": "Inhaber Handwerk",
+  "recommended_query": "Inhaber Physiotherapie",
   "exploration_share": 0.15,
   "errors": 0
 }
