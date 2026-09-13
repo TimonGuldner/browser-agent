@@ -1,6 +1,6 @@
 {
   "status": "ok",
-  "checked_at": "2026-09-13T12:12:05.046408+02:00",
+  "checked_at": "2026-09-13T12:12:27.748728+02:00",
   "daily_metrics": {
     "qualified_leads_found": 0,
     "engagement_actions": 0,
@@ -25,12 +25,7 @@
     "direct_messages": 3,
     "reply_actions": 0
   },
-  "created_jobs": [
-    {
-      "role": "dm_outreach",
-      "job_id": "25c4ab2f-5ff5-42af-8b30-665b94da6149"
-    }
-  ],
+  "created_jobs": [],
   "active_roles_after_check": [
     "dm_outreach",
     "engagement",
@@ -39,7 +34,7 @@
   ],
   "learning": {
     "enabled": true,
-    "learning_run_count": 4,
+    "learning_run_count": 5,
     "recommended_queries": [
       "Inhaber Handwerk",
       "Geschäftsführer lokale Dienstleistungen",

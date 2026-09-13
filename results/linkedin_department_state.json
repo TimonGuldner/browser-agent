@@ -1,5 +1,5 @@
 {
-  "last_run_at": "2026-09-13T10:12:04.978195+00:00",
+  "last_run_at": "2026-09-13T10:12:27.663748+00:00",
   "department_status": "HEALTHY",
   "department_health": "HEALTHY",
   "leads": 61,
@@ -15,7 +15,7 @@
   "paid_customers": 0,
   "queue_backlog": 8,
   "failed_jobs": 0,
-  "queued_jobs": 3,
+  "queued_jobs": 4,
   "account_risk": false,
   "agent_health": {
     "Inbox": "UNKNOWN",
