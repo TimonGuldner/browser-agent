@@ -2,4 +2,5 @@ LOCENIX browser agent wake file.
 Updating this file triggers the GitHub Actions runner.
 Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
-Wake: 2026-09-13 — run CEO measurement, Agent 8 gap enforcement, queue execution and post-run re-measurement now.
+Late-day corrective enforcement remains active until 23:00 Europe/Berlin while gaps remain.
+Wake: 2026-09-13 current audit — verify CEO -> Agent 8 -> queue -> worker -> re-measurement end to end.
