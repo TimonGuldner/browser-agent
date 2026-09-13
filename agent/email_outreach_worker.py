@@ -10,6 +10,8 @@ AIRTABLE_BASE_ID = os.environ["AIRTABLE_SALES_BASE_ID"]
 AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQwsT")
 AIRTABLE_TOKEN = os.environ["AIRTABLE_TOKEN"]
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "Timon Guldner <hello@locenix.com>")
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO", "hello@locenix.com")
 DAILY_LIMIT = int(os.environ.get("EMAIL_DAILY_LIMIT", "20"))
 
 
@@ -35,9 +37,16 @@ def patch_record(record_id, fields):
 
 
 def send_resend(to, subject, text):
+    payload = {
+        "from": EMAIL_FROM,
+        "to": [to],
+        "reply_to": [EMAIL_REPLY_TO],
+        "subject": subject,
+        "text": text,
+    }
     req = urllib.request.Request(
         "https://api.resend.com/emails",
-        data=json.dumps({"to": [to], "subject": subject, "text": text}).encode(),
+        data=json.dumps(payload).encode(),
         method="POST",
         headers=resend_headers(),
     )
@@ -51,7 +60,18 @@ def list_candidates():
     return get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
 
 
-def already_sent_today():
+def all_sent_emails() -> set[str]:
+    formula = "{Email Sent At}!=''"
+    params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
+    rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
+    return {
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in rows
+        if (r.get("fields") or {}).get("Email")
+    }
+
+
+def sent_today_count() -> int:
     today = datetime.now(timezone.utc).date().isoformat()
     formula = f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'))"
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
@@ -60,15 +80,17 @@ def already_sent_today():
 
 
 def main():
-    sent_today = already_sent_today()
+    sent_today = sent_today_count()
     remaining = max(0, DAILY_LIMIT - sent_today)
     if remaining == 0:
         print(json.dumps({"status": "quota_reached", "sent_today": sent_today}))
         return
 
+    historically_sent = all_sent_emails()
     seen = set()
     sent = []
     errors = []
+
     for rec in list_candidates():
         if len(sent) >= remaining:
             break
@@ -76,11 +98,10 @@ def main():
         email = str(f.get("Email") or "").strip().lower()
         company = str(f.get("Company") or "").strip().lower()
         key = email or company
-        if not key or key in seen:
+        if not key or key in seen or email in historically_sent:
             continue
         seen.add(key)
-        if f.get("Email Message ID") or f.get("Email Sent At"):
-            continue
+
         try:
             out = send_resend(email, str(f["Outreach Subject"]), str(f["Outreach Draft"]))
             message_id = str(out.get("id") or "")
@@ -92,10 +113,11 @@ def main():
                 "Email Sent At": datetime.now(timezone.utc).isoformat(),
                 "Email Send Error": "",
             })
+            historically_sent.add(email)
             sent.append({"record": rec["id"], "email": email, "message_id": message_id})
         except Exception as exc:
             try:
-                patch_record(rec["id"], {"Email Send Error": str(exc)[:900]})
+                patch_record(rec["id"], {"Email Send Status": "FAILED", "Email Send Error": str(exc)[:900]})
             except Exception:
                 pass
             errors.append({"record": rec.get("id"), "error": str(exc)})
