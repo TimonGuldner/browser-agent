@@ -10,6 +10,7 @@ on:
       - 'agent/linkedin_department_head.py'
       - 'agent/linkedin_execution_enforcer.py'
       - 'agent/linkedin_execution_enforcer_v2.py'
+      - 'agent/linkedin_execution_enforcer_v3.py'
       - 'agent/linkedin_department_control.py'
       - 'agent/linkedin_learning_optimizer.py'
       - 'agent/lead_v3.py'
@@ -66,9 +67,9 @@ jobs:
         if: steps.gate.outputs.run_review == 'true'
         run: python -m agent.linkedin_department_head
 
-      - name: Enforce hard department execution targets
+      - name: Recover stale work and enforce hard daily targets
         if: steps.gate.outputs.run_review == 'true'
-        run: python -m agent.linkedin_execution_enforcer_v2
+        run: python -m agent.linkedin_execution_enforcer_v3
 
       - name: Verify target actual gap action control
         if: steps.gate.outputs.run_review == 'true'
