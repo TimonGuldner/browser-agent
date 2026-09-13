@@ -26,6 +26,7 @@ jobs:
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
       AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -79,6 +80,18 @@ jobs:
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: python -m agent.ceo_supervisor
+
+      - name: Close approved email quota gap
+        if: steps.config.outputs.ready == 'true' && env.RESEND_API_KEY != '' && env.AIRTABLE_PAT != ''
+        continue-on-error: true
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_PAT }}
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+          EMAIL_DAILY_LIMIT: '20'
+          EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
+          EMAIL_REPLY_TO: 'hello@locenix.com'
+        shell: bash
+        run: python -m agent.email_outreach_worker
 
       - name: Run deterministic technical supervisor
         if: steps.config.outputs.ready == 'true'
