@@ -1,11 +1,11 @@
 {
   "state": {
     "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-    "last_run_at": "2026-09-13T10:51:28.815467+00:00",
+    "last_run_at": "2026-09-13T11:35:17.185606+00:00",
     "status": "OK",
-    "learning_run_count": 7,
-    "people_evaluated": 61,
-    "interactions_observed": 83,
+    "learning_run_count": 8,
+    "people_evaluated": 62,
+    "interactions_observed": 84,
     "run_reports_observed": 11,
     "query_attribution_count": 0,
     "learned_queries": 0,
@@ -16,8 +16,8 @@
   },
   "learning": {
     "agent": "AGENT_8L_LINKEDIN_LEARNING_OPTIMIZER",
-    "generated_at": "2026-09-13T10:51:28.815467+00:00",
-    "learning_run_count": 7,
+    "generated_at": "2026-09-13T11:35:17.185606+00:00",
+    "learning_run_count": 8,
     "mode": "SAFE_OUTCOME_LEARNING",
     "principle": "Learn priorities from measured LinkedIn/Airtable outcomes; never rewrite executable code or bypass safety rules.",
     "exploration_share": 0.15,
@@ -50,16 +50,16 @@
     "title_segment_stats": {
       "marketing": {
         "samples": 24,
-        "reward": 6.25,
-        "avg_reward": 0.26,
+        "reward": 6.75,
+        "avg_reward": 0.281,
         "positive_rate": 0.042,
         "negative_rate": 0.0
       },
       "owner_founder": {
-        "samples": 24,
+        "samples": 25,
         "reward": 10.5,
-        "avg_reward": 0.438,
-        "positive_rate": 0.125,
+        "avg_reward": 0.42,
+        "positive_rate": 0.12,
         "negative_rate": 0.0
       },
       "other": {
@@ -100,10 +100,10 @@
         "negative_rate": 0.0
       },
       "LinkedIn Search": {
-        "samples": 54,
-        "reward": 16.5,
-        "avg_reward": 0.306,
-        "positive_rate": 0.074,
+        "samples": 55,
+        "reward": 17.0,
+        "avg_reward": 0.309,
+        "positive_rate": 0.073,
         "negative_rate": 0.0
       },
       "Comment Section": {
