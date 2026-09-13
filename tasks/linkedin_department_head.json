@@ -11,7 +11,9 @@
     "qualified_leads_found": 10,
     "engagement_actions": 3,
     "connection_requests": 5,
+    "direct_messages": 3,
     "positive_replies_handled_same_day": true,
+    "all_inbound_replies_handled_same_day": true,
     "overdue_followups": 0
   },
   "funnel": [
@@ -34,6 +36,7 @@
     "lead": "research_and_qualification_only",
     "engagement": "comments_and_relationship_warmup_only",
     "outreach": "connection_and_first_contact_only",
+    "dm_outreach": "individual_direct_messages_to_eligible_connected_or_open_profile_leads_only",
     "inbox": "exclusive_conversation_and_followup_owner_after_reply",
     "content": "own_content_only"
   },
@@ -42,6 +45,8 @@
     "positive_replies",
     "active_conversations",
     "overdue_followups",
+    "reply_gap",
+    "dm_gap",
     "engagement_ready",
     "connection_ready",
     "qualified_leads",
@@ -78,6 +83,8 @@
     "no_mass_dm_or_mass_comments": true,
     "no_security_bypass": true,
     "new_agents_start_proposed": true,
-    "human_approval_for_external_strategy_costs_and_activation": true
+    "human_approval_for_external_strategy_costs_and_activation": true,
+    "ceo_must_receive_daily_target_actual_gap_evidence": true,
+    "daily_targets_are_hard_accountability_targets_not_reporting_suggestions": true
   }
 }
