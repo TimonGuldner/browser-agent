@@ -1,0 +1,29 @@
+name: LOCENIX Email Outreach Closed Loop
+
+on:
+  schedule:
+    - cron: '30 8 * * *'
+    - cron: '30 11 * * *'
+    - cron: '30 14 * * *'
+    - cron: '30 17 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-approved-outreach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Send approved unique outreach emails
+        env:
+          AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_DAILY_LIMIT: '20'
+        run: python -m agent.email_outreach_worker
