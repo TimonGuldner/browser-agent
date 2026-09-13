@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,6 +18,7 @@ HARD_DAILY_TARGETS = {
     'connection_requests': 10,
     'direct_messages': 5,
 }
+TRANSIENT_HTTP_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 def _parse(value: object) -> datetime | None:
@@ -27,15 +30,47 @@ def _parse(value: object) -> datetime | None:
         return None
 
 
+def _with_transient_retry(label: str, fn, attempts: int = 4):
+    delay = 1.0
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in TRANSIENT_HTTP_CODES or attempt >= attempts:
+                raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt >= attempts:
+                raise
+        print(json.dumps({
+            'warning': 'transient_supabase_error',
+            'operation': label,
+            'attempt': attempt,
+            'next_retry_seconds': delay,
+            'error': str(last_error),
+        }, ensure_ascii=False))
+        time.sleep(delay)
+        delay = min(delay * 2, 8.0)
+    if last_error:
+        raise last_error
+    raise RuntimeError(f'{label} failed without an exception')
+
+
 def _patch_job(job_id: str, payload: dict) -> None:
     import urllib.request
-    req = urllib.request.Request(
-        f'{base.SUPABASE_URL}/rest/v1/agent_jobs?id=eq.{job_id}',
-        data=json.dumps(payload).encode('utf-8'), method='PATCH',
-        headers={**base.supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
-    )
-    with urllib.request.urlopen(req, timeout=30):
-        pass
+
+    def _request():
+        req = urllib.request.Request(
+            f'{base.SUPABASE_URL}/rest/v1/agent_jobs?id=eq.{job_id}',
+            data=json.dumps(payload).encode('utf-8'), method='PATCH',
+            headers={**base.supabase_headers(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal'},
+        )
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+
+    _with_transient_retry('patch_agent_job', _request)
 
 
 def _enqueue_high_priority(role: str, *, department_role: str | None = None, phase: str | None = None,
@@ -63,9 +98,12 @@ def _enqueue_high_priority(role: str, *, department_role: str | None = None, pha
         'priority': max(1, int(priority) + int(priority_boost)),
         'max_steps': max_steps, 'input': inp,
     }
-    rows = base.post_json(
-        f'{base.SUPABASE_URL}/rest/v1/agent_jobs', payload,
-        {**base.supabase_headers(), 'Prefer': 'return=representation'},
+    rows = _with_transient_retry(
+        f'enqueue_{department_role or role}',
+        lambda: base.post_json(
+            f'{base.SUPABASE_URL}/rest/v1/agent_jobs', payload,
+            {**base.supabase_headers(), 'Prefer': 'return=representation'},
+        ),
     )
     if not isinstance(rows, list) or not rows:
         raise RuntimeError(f'Could not enqueue {department_role or role}')
@@ -75,7 +113,20 @@ def _enqueue_high_priority(role: str, *, department_role: str | None = None, pha
 def recover_stale_quota_jobs() -> dict:
     now = datetime.now(timezone.utc)
     query = 'status=in.(queued,running)&select=id,status,created_at,updated_at,locked_at,input&limit=200'
-    rows = base.get_json(f'{base.SUPABASE_URL}/rest/v1/agent_jobs?{query}', base.supabase_headers())
+    try:
+        rows = _with_transient_retry(
+            'load_active_quota_jobs',
+            lambda: base.get_json(f'{base.SUPABASE_URL}/rest/v1/agent_jobs?{query}', base.supabase_headers()),
+        )
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        # A watchdog read must never prevent the actual quota-enforcement pass from running.
+        print(json.dumps({
+            'warning': 'quota_watchdog_read_failed_after_retries',
+            'error': str(exc),
+            'action': 'continue_without_stale_recovery',
+        }, ensure_ascii=False))
+        return {'stale_recovered': [], 'healthy_active_jobs': [], 'watchdog_degraded': True, 'error': str(exc)}
+
     rows = rows if isinstance(rows, list) else []
     recovered = []
     healthy = []
@@ -91,13 +142,22 @@ def recover_stale_quota_jobs() -> dict:
         if age <= threshold:
             healthy.append(str(row.get('id')))
             continue
-        _patch_job(str(row['id']), {
-            'status': 'failed',
-            'error': f'RETRY_REQUIRED: Agent 8 quota watchdog replaced stale {status} {role} job after {round(age, 1)} minutes without timely verified progress.',
-            'updated_at': now.isoformat(),
-        })
-        recovered.append({'job_id': str(row['id']), 'role': role, 'old_status': status, 'age_minutes': round(age, 1)})
-    return {'stale_recovered': recovered, 'healthy_active_jobs': healthy}
+        try:
+            _patch_job(str(row['id']), {
+                'status': 'failed',
+                'error': f'RETRY_REQUIRED: Agent 8 quota watchdog replaced stale {status} {role} job after {round(age, 1)} minutes without timely verified progress.',
+                'updated_at': now.isoformat(),
+            })
+            recovered.append({'job_id': str(row['id']), 'role': role, 'old_status': status, 'age_minutes': round(age, 1)})
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            print(json.dumps({
+                'warning': 'stale_job_patch_failed_after_retries',
+                'job_id': str(row.get('id')),
+                'role': role,
+                'error': str(exc),
+                'action': 'continue_enforcement',
+            }, ensure_ascii=False))
+    return {'stale_recovered': recovered, 'healthy_active_jobs': healthy, 'watchdog_degraded': False}
 
 
 def _enqueue_fixed(role: str, *, department_role: str | None = None, phase: str | None = None,
