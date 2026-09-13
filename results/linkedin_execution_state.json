@@ -1,6 +1,6 @@
 {
   "status": "ok",
-  "checked_at": "2026-09-13T12:12:27.748728+02:00",
+  "checked_at": "2026-09-13T12:51:08.776053+02:00",
   "daily_metrics": {
     "qualified_leads_found": 0,
     "engagement_actions": 0,
@@ -25,16 +25,34 @@
     "direct_messages": 3,
     "reply_actions": 0
   },
-  "created_jobs": [],
+  "created_jobs": [
+    {
+      "role": "lead",
+      "job_id": "c5d2a251-a53e-4c4c-b2c8-c122a784cc73"
+    },
+    {
+      "role": "engagement",
+      "job_id": "56fa13b5-ec1d-4b13-bfab-2a60fde85e68"
+    },
+    {
+      "role": "outreach",
+      "job_id": "3d26b722-174d-434d-9b73-2b38dc9326f5"
+    },
+    {
+      "role": "dm_outreach",
+      "job_id": "c5a10a34-e8ea-43e8-831b-0ec358347b55"
+    }
+  ],
   "active_roles_after_check": [
     "dm_outreach",
     "engagement",
+    "inbox",
     "lead",
     "outreach"
   ],
   "learning": {
     "enabled": true,
-    "learning_run_count": 5,
+    "learning_run_count": 6,
     "recommended_queries": [
       "Inhaber Handwerk",
       "Geschäftsführer lokale Dienstleistungen",
