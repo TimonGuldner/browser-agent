@@ -91,43 +91,77 @@ class MeteredChatOpenAI(BrowserUseChatOpenAI):
         return response
 
 
-def openai_llm(*args, **kwargs):
-    """Return the best configured provider instead of hard-depending on OpenAI.
+def _configured_provider_chain() -> list[str]:
+    """Provider preference for automatic failover.
 
-    Auto order intentionally prefers Browser Use / Google when configured because the
-    current OpenAI key may exist but have exhausted billing credits. Explicit
-    LOCENIX_LLM_PROVIDER can force browser_use, google, anthropic or openai.
+    Default order is OpenAI -> Google/Gemini -> Anthropic -> Browser Use.
+    LOCENIX_LLM_PROVIDER may force a single provider for debugging.
+    """
+    requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
+    configured = {
+        "openai": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "google": bool(os.getenv("GOOGLE_API_KEY", "").strip()),
+        "anthropic": bool(os.getenv("ANTHROPIC_API_KEY", "").strip()),
+        "browser_use": bool(os.getenv("BROWSER_USE_API_KEY", "").strip()),
+    }
+    if requested != "auto":
+        return [requested] if configured.get(requested) else []
+    return [name for name in ("openai", "google", "anthropic", "browser_use") if configured[name]]
+
+
+def openai_llm(*args, **kwargs):
+    """Construct the provider selected for this attempt.
+
+    Automatic retry/failover is handled around the complete browser-agent run so a
+    failed OpenAI attempt can be restarted cleanly on Gemini.
     """
     global _ACTIVE_PROVIDER, _ACTIVE_MODEL
     requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
-    browser_key = os.getenv("BROWSER_USE_API_KEY", "").strip()
-    google_key = os.getenv("GOOGLE_API_KEY", "").strip()
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    provider = requested if requested != "auto" else (_configured_provider_chain()[0] if _configured_provider_chain() else "")
 
-    def allowed(name: str) -> bool:
-        return requested in {"auto", name}
-
-    if browser_key and allowed("browser_use"):
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "browser_use", "bu-latest"
-        return ChatBrowserUse()
-    if google_key and allowed("google"):
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "google", "gemini-2.5-flash"
-        return ChatGoogle(model="gemini-2.5-flash")
-    if anthropic_key and allowed("anthropic"):
-        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "anthropic", "claude-sonnet-4-6"
-        return ChatAnthropic(model="claude-sonnet-4-6")
-    if openai_key and allowed("openai"):
+    if provider == "openai" and os.getenv("OPENAI_API_KEY", "").strip():
         policy = _policy_for_current_role()
         _ACTIVE_PROVIDER, _ACTIVE_MODEL = "openai", OPENAI_MODEL
         return MeteredChatOpenAI(
-            model=OPENAI_MODEL, api_key=openai_key, temperature=None, frequency_penalty=None,
+            model=OPENAI_MODEL, api_key=os.getenv("OPENAI_API_KEY", "").strip(), temperature=None, frequency_penalty=None,
             reasoning_effort=str(policy["reasoning_effort"]), reasoning_models=[OPENAI_MODEL],
             max_completion_tokens=int(policy["max_completion_tokens"]), timeout=100, max_retries=2,
         )
-    raise RuntimeError(
-        "BLOCKED_LLM_PROVIDER: no usable Browser Use, Google, Anthropic or OpenAI provider is configured for LOCENIX."
+    if provider == "google" and os.getenv("GOOGLE_API_KEY", "").strip():
+        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "google", "gemini-2.5-flash"
+        return ChatGoogle(model="gemini-2.5-flash")
+    if provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY", "").strip():
+        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "anthropic", "claude-sonnet-4-6"
+        return ChatAnthropic(model="claude-sonnet-4-6")
+    if provider == "browser_use" and os.getenv("BROWSER_USE_API_KEY", "").strip():
+        _ACTIVE_PROVIDER, _ACTIVE_MODEL = "browser_use", "bu-latest"
+        return ChatBrowserUse()
+    raise RuntimeError("BLOCKED_LLM_PROVIDER: selected provider is not configured for LOCENIX.")
+
+
+def _provider_failure_text(db, job_id: str, exc: Exception | None = None) -> str:
+    parts: list[str] = []
+    if exc is not None:
+        parts.append(str(exc))
+    try:
+        row = db.table("agent_jobs").select("status,error,result").eq("id", job_id).single().execute().data or {}
+        parts.append(str(row.get("error") or ""))
+        result = row.get("result") or {}
+        parts.append(str(result.get("errors") or ""))
+        parts.append(str(result.get("final_result") or ""))
+    except Exception:
+        pass
+    return " ".join(parts).lower()
+
+
+def _should_failover(text: str) -> bool:
+    provider_markers = (
+        "credit_balance_exhausted", "insufficient_quota", "quota", "billing", "429",
+        "rate limit", "rate_limit", "401", "403", "authentication", "api key", "api_key",
+        "model not found", "model_not_found", "provider unavailable", "service unavailable",
+        "overloaded", "capacity", "llm provider", "llm request", "resource exhausted",
     )
+    return any(marker in text for marker in provider_markers)
 
 
 class AirtableEnabledAgent(BrowserUseAgent):
@@ -159,7 +193,7 @@ def _monthly_cost(db) -> float:
         raise RuntimeError("Could not read the monthly LOCENIX LLM cost ledger from Supabase.") from exc
 
 
-def _persist_usage(db, job_id: str, role: str) -> None:
+def _persist_usage(db, job_id: str, role: str, provider_attempts: list[dict[str, Any]] | None = None) -> None:
     try:
         row = db.table("agent_jobs").select("result").eq("id", job_id).single().execute().data
         result = (row or {}).get("result") or {}
@@ -168,6 +202,9 @@ def _persist_usage(db, job_id: str, role: str) -> None:
         result["llm_model"] = _ACTIVE_MODEL
         result["llm_usage"] = dict(_USAGE)
         result["estimated_openai_metered_cost_usd"] = round(_estimated_cost_usd(), 6) if _ACTIVE_PROVIDER == "openai" else None
+        if provider_attempts is not None:
+            result["provider_attempts"] = provider_attempts
+            result["provider_failover_used"] = len(provider_attempts) > 1
         result["cost_optimization"] = {
             "vision": False, "message_compaction": True, "prompt_cache_friendly": True,
             "flash_mode": bool(policy["flash_mode"]), "reasoning_effort": policy["reasoning_effort"],
@@ -223,10 +260,75 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
     bounded_job = dict(job)
     bounded_job["max_steps"] = min(int(job.get("max_steps") or policy["max_steps"]), int(policy["max_steps"]))
 
+    requested = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
+    provider_chain = _configured_provider_chain()
+    if not provider_chain:
+        raise RuntimeError("BLOCKED_LLM_PROVIDER: no configured provider is available.")
+    if requested != "auto":
+        provider_chain = provider_chain[:1]
+
+    attempts: list[dict[str, Any]] = []
+    last_exc: Exception | None = None
+    original_provider_setting = os.environ.get("LOCENIX_LLM_PROVIDER")
     try:
-        await _original_run_agent_job(db, bounded_job)
+        for index, provider in enumerate(provider_chain):
+            os.environ["LOCENIX_LLM_PROVIDER"] = provider
+            _reset_usage(float(policy["run_budget_usd"]))
+            local_worker.update_job(db, job_id, status="running", error=None)
+            exc: Exception | None = None
+            try:
+                await _original_run_agent_job(db, bounded_job)
+            except Exception as caught:
+                exc = caught
+                last_exc = caught
+
+            failure_text = _provider_failure_text(db, job_id, exc)
+            try:
+                state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data or {}
+                status = str(state.get("status") or "")
+            except Exception:
+                status = "failed" if exc else "unknown"
+
+            attempts.append({
+                "provider": provider,
+                "model": _ACTIVE_MODEL,
+                "status": status,
+                "failover_eligible": _should_failover(failure_text),
+            })
+
+            if exc is None and status == "completed":
+                break
+
+            has_next = index + 1 < len(provider_chain)
+            if not has_next or not _should_failover(failure_text):
+                if exc is not None:
+                    raise exc
+                break
+
+            next_provider = provider_chain[index + 1]
+            local_worker.add_event(
+                db, job_id, "llm.provider_failover",
+                f"LLM provider {provider} failed; retrying with {next_provider}.",
+                {"from": provider, "to": next_provider},
+            )
+            local_worker.update_job(
+                db, job_id, status="running", error=None,
+                result={"provider_failover_in_progress": True, "from": provider, "to": next_provider},
+            )
+
+        if last_exc is not None:
+            try:
+                state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data or {}
+                if str(state.get("status") or "") != "completed" and attempts and not attempts[-1]["failover_eligible"]:
+                    raise last_exc
+            except Exception:
+                pass
     finally:
-        _persist_usage(db, job_id, role)
+        if original_provider_setting is None:
+            os.environ.pop("LOCENIX_LLM_PROVIDER", None)
+        else:
+            os.environ["LOCENIX_LLM_PROVIDER"] = original_provider_setting
+        _persist_usage(db, job_id, role, attempts)
         if scheduled and role == "inbox":
             try:
                 state = db.table("agent_jobs").select("status").eq("id", job_id).single().execute().data
