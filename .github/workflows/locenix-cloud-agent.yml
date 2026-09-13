@@ -109,7 +109,7 @@ jobs:
           python - <<'PY'
           from agent import llm_router
           try:
-              text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=32)
+              text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=256)
               print({'text': text.strip()[:50], 'provider': meta.get('provider'), 'model': meta.get('model'), 'key_slot': meta.get('key_slot'), 'failover': meta.get('provider_failover_used')})
               if meta.get('provider') != 'google' or not text.strip():
                   print('WARNING: Gemini smoke test degraded; operational and deterministic workers will continue.')
