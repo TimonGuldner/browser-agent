@@ -4,4 +4,4 @@ Agent 0 CEO closed-loop supervisor is enabled.
 System-wide priority invariant: larger priority number executes first.
 Central LLM router is enabled with Gemini-first task routing, multi-key provider pools and safe failover.
 Deterministic lead research remains zero-LLM.
-Wake: 2026-09-13 22:50 Europe/Berlin — test quota-efficient Gemini routing: scheduled smoke tests disabled, Gemini model pool restricted to verified Flash plus official Flash-Lite fallback; continue Agent 0 closed-loop recovery and only count technically confirmed external actions.
+Wake: 2026-09-14 01:13 Europe/Berlin — rerun after fixing Gemini router self-test mismatch; continue Agent 0 closed-loop recovery and only count technically confirmed external actions.
