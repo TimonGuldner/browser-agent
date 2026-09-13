@@ -7,7 +7,10 @@ import urllib.request
 from datetime import datetime, timezone
 
 AIRTABLE_BASE_ID = os.environ["AIRTABLE_SALES_BASE_ID"]
-AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQwsT")
+AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQws5T")
+# Backward-compatible correction for the actual production table ID.
+if AIRTABLE_TABLE_ID == "tblF4ghkYFzkeQws5T":
+    AIRTABLE_TABLE_ID = "tblF4ghkYFzkeQwsT"
 AIRTABLE_TOKEN = os.environ["AIRTABLE_TOKEN"]
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "Timon Guldner <hello@locenix.com>")
@@ -45,10 +48,7 @@ def send_resend(to, subject, text):
         "text": text,
     }
     req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode(),
-        method="POST",
-        headers=resend_headers(),
+        "https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers=resend_headers(),
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode())
@@ -61,22 +61,31 @@ def list_candidates():
 
 
 def all_sent_emails() -> set[str]:
+    # Any previous provider submission is kept out of automatic retries, including bounces.
+    # A bounced/failed address must be investigated rather than automatically resent.
     formula = "{Email Sent At}!=''"
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
     rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
     return {
         str((r.get("fields") or {}).get("Email") or "").strip().lower()
-        for r in rows
-        if (r.get("fields") or {}).get("Email")
+        for r in rows if (r.get("fields") or {}).get("Email")
     }
 
 
 def sent_today_count() -> int:
+    # Daily quota counts only technically confirmed records that are still SENT.
+    # FAILED/bounced records may retain Sent At for audit but must not satisfy the KPI.
     today = datetime.now(timezone.utc).date().isoformat()
-    formula = f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'))"
+    formula = (
+        f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'),"
+        "{Email Send Status}='SENT',{Email Message ID}!='')"
+    )
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
     rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
-    return len({str((r.get("fields") or {}).get("Email") or "").strip().lower() for r in rows if (r.get("fields") or {}).get("Email")})
+    return len({
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in rows if (r.get("fields") or {}).get("Email")
+    })
 
 
 def main():
