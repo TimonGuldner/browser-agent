@@ -41,7 +41,7 @@ def main() -> None:
         "p_amount_eur": "0", "p_category": "llm", "p_provider": "integration",
         "p_service": "control-plane-ci", "p_reason": "zero-cost ledger path canary",
         "p_run_id": run_id, "p_job_id": task_id, "p_agent_id": "CFO_GUARD",
-        "p_department": "CFO", "p_model_tier": "small", "p_difficult_decision": False,
+        "p_department": "CFO", "p_model_tier": "small", "p_difficult_decision": False, "p_essential": True,
         "p_metadata": {"test": True, "marker": marker},
     })
     cost_id = cp.rpc("company_record_cost", {

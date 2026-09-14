@@ -34,7 +34,7 @@ def _rpc(name: str, payload: Mapping[str, Any]) -> Any:
 
 def authorize_and_book_estimate(*, provider: str, service: str, amount_eur: Decimal | str,
                                 task_type: str, model_tier: str = "small",
-                                difficult_decision: bool = False, metadata: Mapping[str, Any] | None = None) -> str:
+                                difficult_decision: bool = False, essential: bool = False, metadata: Mapping[str, Any] | None = None) -> str:
     """Reserve and conservatively book a per-call upper bound before execution.
 
     Until provider invoices expose exact EUR cost, booked values are explicitly
@@ -48,7 +48,7 @@ def authorize_and_book_estimate(*, provider: str, service: str, amount_eur: Deci
         "p_job_id": os.getenv("LOCENIX_TASK_ID") or None,
         "p_agent_id": os.getenv("LOCENIX_AGENT_ID", "CFO_GUARD"),
         "p_department": os.getenv("LOCENIX_DEPARTMENT", "CFO"),
-        "p_model_tier": model_tier, "p_difficult_decision": difficult_decision,
+        "p_model_tier": model_tier, "p_difficult_decision": difficult_decision, "p_essential": essential,
         "p_metadata": {"accounting_basis": "upper_bound_booking", **dict(metadata or {})},
     })
     if not auth or not auth.get("allowed"):

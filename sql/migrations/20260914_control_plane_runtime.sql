@@ -36,13 +36,13 @@ begin
  update public.company_agents set status='busy',updated_at=now()where agent_id=p_agent_id;
  perform public.company_record_event(j.run_id,p_agent_id,a.department,p_task_id,'task.assigned','running','Task assigned',0,'{}');
  return jsonb_build_object('task_id',p_task_id,'agent_id',p_agent_id,'status','running');
-end$function$;\n\nCREATE OR REPLACE FUNCTION public.company_authorize_spend(p_amount_eur numeric, p_category text, p_provider text, p_service text, p_reason text, p_run_id uuid DEFAULT NULL::uuid, p_job_id uuid DEFAULT NULL::uuid, p_agent_id text DEFAULT NULL::text, p_department text DEFAULT NULL::text, p_model_tier text DEFAULT 'small'::text, p_difficult_decision boolean DEFAULT false, p_metadata jsonb DEFAULT '{}'::jsonb)
+end$function$;\n\nCREATE OR REPLACE FUNCTION public.company_authorize_spend(p_amount_eur numeric, p_category text, p_provider text, p_service text, p_reason text, p_run_id uuid DEFAULT NULL::uuid, p_job_id uuid DEFAULT NULL::uuid, p_agent_id text DEFAULT NULL::text, p_department text DEFAULT NULL::text, p_model_tier text DEFAULT 'small'::text, p_difficult_decision boolean DEFAULT false, p_metadata jsonb DEFAULT '{}'::jsonb, p_essential boolean DEFAULT false)
  RETURNS jsonb
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
-declare b record;v_id uuid;
+declare b record;id uuid;
 begin
  if p_amount_eur<0 then raise exception 'amount must be non-negative';end if;
  if p_model_tier='strong'and not p_difficult_decision then return jsonb_build_object('allowed',false,'reason','STRONG_MODEL_NOT_JUSTIFIED');end if;
@@ -50,13 +50,20 @@ begin
  update public.company_cost_reservations set status='expired',updated_at=now()where status='reserved'and expires_at<=now();
  select * into b from public.company_budget_status;
  if b.spent_eur+b.committed_eur+p_amount_eur>b.limit_eur then
- perform public.company_record_event(p_run_id,coalesce(p_agent_id,'CFO_GUARD'),'CFO',p_job_id,'cost.blocked','blocked',
- 'CFO hard budget guard blocked spend',0,jsonb_build_object('requested_eur',p_amount_eur,'remaining_eur',b.remaining_eur));
- return jsonb_build_object('allowed',false,'reason','ROLLING_30_DAY_HARD_CAP','remaining_eur',b.remaining_eur);end if;
+  perform public.company_record_event(p_run_id,coalesce(p_agent_id,'CFO_GUARD'),'CFO',p_job_id,'cost.blocked','blocked',
+  'CFO absolute hard cap blocked spend',0,jsonb_build_object('requested_eur',p_amount_eur,'remaining_eur',b.remaining_eur));
+  return jsonb_build_object('allowed',false,'reason','ROLLING_30_DAY_HARD_CAP','remaining_eur',b.remaining_eur);
+ end if;
+ if not p_essential and b.projected_spend_eur>b.limit_eur then
+  perform public.company_record_event(p_run_id,coalesce(p_agent_id,'CFO_GUARD'),'CFO',p_job_id,'cost.blocked','blocked',
+  'CFO burn-rate guard blocked non-essential spend',0,jsonb_build_object('requested_eur',p_amount_eur,'projected_spend_eur',b.projected_spend_eur));
+  return jsonb_build_object('allowed',false,'reason','PROJECTED_30D_BUDGET_EXCEEDED','remaining_eur',b.remaining_eur,
+  'projected_spend_eur',b.projected_spend_eur);
+ end if;
  insert into public.company_cost_reservations(run_id,job_id,agent_id,department,category,provider,service,amount_eur,model_tier,difficult_decision,reason,metadata)
  values(p_run_id,p_job_id,p_agent_id,p_department,p_category,p_provider,p_service,p_amount_eur,p_model_tier,p_difficult_decision,p_reason,coalesce(p_metadata,'{}'))
- returning id into v_id;
- return jsonb_build_object('allowed',true,'reason','AUTHORIZED','reservation_id',v_id,'remaining_eur',b.remaining_eur-p_amount_eur);
+ returning company_cost_reservations.id into id;
+ return jsonb_build_object('allowed',true,'reason','AUTHORIZED','reservation_id',id,'remaining_eur',b.remaining_eur-p_amount_eur);
 end$function$;\n\nCREATE OR REPLACE FUNCTION public.company_cancel_task(p_task_id uuid, p_reason text)
  RETURNS void
  LANGUAGE plpgsql
@@ -402,7 +409,8 @@ begin
    end if;
   end loop;
  end loop;
-end$function$;\n\ndrop view if exists public.company_mission_control;\ndrop view if exists public.company_budget_status;\ncreate view public.company_budget_status as\nWITH l AS (
+end$function$;\n\ndrop view if exists public.company_mission_control;\ndrop view if exists public.company_budget_status;\ncreate view public.company_budget_status as
+WITH l AS (
          SELECT COALESCE(sum(company_cost_events.amount_eur) FILTER (WHERE (company_cost_events.occurred_at >= (now() - '30 days'::interval))), (0)::numeric) AS spent,
             COALESCE(sum(company_cost_events.amount_eur) FILTER (WHERE (company_cost_events.occurred_at >= date_trunc('day'::text, now()))), (0)::numeric) AS daily
            FROM company_cost_events
@@ -425,7 +433,10 @@ end$function$;\n\ndrop view if exists public.company_mission_control;\ndrop view
     GREATEST((0)::numeric, (((30)::numeric - spent_eur) - committed)) AS remaining_eur,
     ((spent_eur + committed) >= (30)::numeric) AS hard_stop,
     1.000000 AS usd_to_eur_guard_rate
-   FROM t;\n\ncreate view public.company_mission_control as\nSELECT now() AS observed_at,
+   FROM t;
+
+create view public.company_mission_control as
+SELECT now() AS observed_at,
     ( SELECT (count(*))::integer AS count
            FROM company_runs
           WHERE (company_runs.status = 'running'::text)) AS active_runs,
@@ -453,7 +464,9 @@ end$function$;\n\ndrop view if exists public.company_mission_control;\ndrop view
            FROM company_budget_status) AS budget_hard_stop,
     ( SELECT (count(*))::integer AS count
            FROM company_worker_heartbeats
-          WHERE (company_worker_heartbeats.last_seen_at > (now() - '00:05:00'::interval))) AS live_workers;\n\ngrant select on public.company_budget_status,public.company_mission_control to service_role;
+          WHERE (company_worker_heartbeats.last_seen_at > (now() - '00:05:00'::interval))) AS live_workers;
+
+grant select on public.company_budget_status,public.company_mission_control to service_role;
 do $block$
 declare f record;
 begin
