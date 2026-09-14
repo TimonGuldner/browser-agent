@@ -204,10 +204,9 @@ def main() -> int:
         ("region", "DE"),
         ("limit", str(limit)),
         ("async", "true"),
-        ("enrichment", "contacts_n_leads"),
     ]
 
-    print(json.dumps({"probe": "outscraper_maps_contacts_async", "query": query, "limit": limit}, ensure_ascii=False))
+    print(json.dumps({"probe": "outscraper_maps_only_async", "query": query, "limit": limit}, ensure_ascii=False))
 
     request_id = ""
     with httpx.Client() as client:
