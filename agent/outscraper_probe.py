@@ -119,11 +119,9 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
     direct: list[dict[str, Any]] = []
 
     if isinstance(raw, list):
-        # With flat=true the documented shape is data=[{place}, ...].
         if all(isinstance(item, dict) for item in raw):
             direct = [item for item in raw if isinstance(item, dict)]
         else:
-            # With flat=false the documented shape is data=[[{place}, ...], ...].
             for group in raw:
                 if isinstance(group, list):
                     direct.extend(item for item in group if isinstance(item, dict))
@@ -163,7 +161,7 @@ def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_s
         attempt += 1
         response = client.get(
             REQUEST_URL.format(request_id=request_id),
-            params={"flat": "true"},
+            params={"flat": "false"},
             headers={"X-API-KEY": key},
             timeout=30.0,
         )
@@ -206,7 +204,6 @@ def main() -> int:
         ("region", "DE"),
         ("limit", str(limit)),
         ("async", "true"),
-        ("dropDuplicates", "true"),
         ("enrichment", "contacts_n_leads"),
     ]
 
