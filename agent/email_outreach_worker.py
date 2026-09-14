@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -43,8 +44,15 @@ def patch_record(record_id, fields):
 def send_resend(to, subject, text):
     payload = {"from": EMAIL_FROM, "to": [to], "reply_to": [EMAIL_REPLY_TO], "subject": subject, "text": text}
     req = urllib.request.Request("https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers=resend_headers())
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(f"RESEND_HTTP_{exc.code}: {body or exc.reason}") from exc
 
 
 def list_all(formula: str) -> list[dict]:
