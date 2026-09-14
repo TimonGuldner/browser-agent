@@ -57,85 +57,45 @@ jobs:
         id: config
         shell: bash
         run: |
-          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "LOCENIX agent is waiting for SUPABASE_SERVICE_ROLE_KEY."
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-          if [[ -z "$AIRTABLE_PAT" ]]; then
-            echo "Airtable is not connected. Scheduled CRM jobs fail closed."
-          fi
-          if [[ -z "$OPENAI_API_KEY" && -z "$OPENAI_API_KEY_2" && -z "$GOOGLE_API_KEY" && -z "$GOOGLE_API_KEY_2" && -z "$ANTHROPIC_API_KEY" && -z "$BROWSER_USE_API_KEY" ]]; then
-            echo "No LLM provider secret is configured. Deterministic paths still run; LLM-dependent work is blocked."
-          fi
-
+          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then echo "ready=false" >> "$GITHUB_OUTPUT"; else echo "ready=true" >> "$GITHUB_OUTPUT"; fi
       - name: Checkout
         if: steps.config.outputs.ready == 'true'
         uses: actions/checkout@v4
-
       - name: Set up Python
         if: steps.config.outputs.ready == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       - name: Install Python dependencies
         if: steps.config.outputs.ready == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-
       - name: Validate central LLM router
         if: steps.config.outputs.ready == 'true'
-        shell: bash
         run: |
           python -m compileall -q agent
           python -m agent.llm_router_selftest
-          python - <<'PY'
-          from agent import llm_router
-          import json
-          print(json.dumps({
-              'browser_reasoning': llm_router.router_status(llm_router.TASK_BROWSER_REASONING),
-              'repair_analysis': llm_router.router_status(llm_router.TASK_REPAIR_ANALYSIS),
-              'deterministic': llm_router.router_status(llm_router.TASK_DETERMINISTIC),
-          }))
-          PY
-
-      - name: Live Gemini router smoke test
-        if: steps.config.outputs.ready == 'true' && env.GOOGLE_API_KEY != '' && github.event_name != 'schedule'
-        continue-on-error: true
-        shell: bash
-        run: |
-          python - <<'PY'
-          from agent import llm_router
-          try:
-              text, meta = llm_router.text_complete('Return exactly the single word OK.', task_type=llm_router.TASK_CHEAP_CLASSIFICATION, max_output_tokens=256)
-              print({'text': text.strip()[:50], 'provider': meta.get('provider'), 'model': meta.get('model'), 'key_slot': meta.get('key_slot'), 'failover': meta.get('provider_failover_used')})
-              if meta.get('provider') != 'google' or not text.strip():
-                  print('WARNING: Gemini smoke test degraded; operational and deterministic workers will continue.')
-          except Exception as exc:
-              print(f'WARNING: Gemini smoke test failed non-fatally: {type(exc).__name__}: {exc}')
-              print('Operational and deterministic workers will continue; provider-specific jobs may fail over independently.')
-          PY
-
       - name: Run Agent 0 CEO measurement and objective sync
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        shell: bash
         run: python -m agent.ceo_supervisor
-
-      - name: Agent 0 prepare approved email quota gap
+      - name: Agent 0 measure email quota and delegate
         if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
         continue-on-error: true
         env:
           AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
           EMAIL_DAILY_LIMIT: '20'
-        shell: bash
         run: python -u -m agent.email_quota_enforcer
-
-      - name: Close approved email quota gap
+      - name: Email Copy Agent prepare approved leads
+        if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
+        continue-on-error: true
+        env:
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+          EMAIL_COPY_LIMIT: '20'
+        run: python -u -m agent.email_copy_worker
+      - name: Email Sender close approved quota gap
         if: steps.config.outputs.ready == 'true' && env.RESEND_API_KEY != '' && env.AIRTABLE_PAT != ''
         continue-on-error: true
         env:
@@ -144,89 +104,40 @@ jobs:
           EMAIL_DAILY_LIMIT: '20'
           EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
           EMAIL_REPLY_TO: 'hello@locenix.com'
-        shell: bash
         run: python -u -m agent.email_outreach_worker
-
       - name: Run deterministic technical supervisor
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        shell: bash
         run: python -m agent.supervisor
-
       - name: Enforce Agent 8 LinkedIn daily gaps
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        shell: bash
         run: python -m agent.linkedin_execution_enforcer_v3
-
       - name: Enqueue due Supabase schedules
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        shell: bash
         run: |
-          curl --fail --silent --show-error \
-            -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
-          echo "Supabase scheduler checked successfully."
-
+          curl --fail --silent --show-error -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Content-Type: application/json" -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
       - name: Check queued work
         if: steps.config.outputs.ready == 'true'
         id: queue
         continue-on-error: true
-        shell: bash
         run: |
-          RESPONSE=$(curl --fail --silent --show-error \
-            "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode,priority&order=priority.desc,created_at.asc&limit=1" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY") || RESPONSE="[]"
-          if [[ "$RESPONSE" == "[]" ]]; then
-            echo "has_work=false" >> "$GITHUB_OUTPUT"
-            echo "needs_login=false" >> "$GITHUB_OUTPUT"
-            echo "No queued LOCENIX work or queue temporarily unavailable."
-          else
-            MODE=$(echo "$RESPONSE" | jq -r '.[0].mode // ""')
-            echo "has_work=true" >> "$GITHUB_OUTPUT"
-            if [[ "$MODE" == "login" ]]; then
-              echo "needs_login=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "needs_login=false" >> "$GITHUB_OUTPUT"
-            fi
-            echo "Queued LOCENIX work found (highest priority first)."
-          fi
-
+          RESPONSE=$(curl --fail --silent --show-error "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode,priority&order=priority.desc,created_at.asc&limit=1" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY") || RESPONSE="[]"
+          if [[ "$RESPONSE" == "[]" ]]; then echo "has_work=false" >> "$GITHUB_OUTPUT"; echo "needs_login=false" >> "$GITHUB_OUTPUT"; else MODE=$(echo "$RESPONSE" | jq -r '.[0].mode // ""'); echo "has_work=true" >> "$GITHUB_OUTPUT"; if [[ "$MODE" == "login" ]]; then echo "needs_login=true" >> "$GITHUB_OUTPUT"; else echo "needs_login=false" >> "$GITHUB_OUTPUT"; fi; fi
       - name: Install Chromium
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
-        shell: bash
         run: python -m playwright install --with-deps chromium
-
-      - name: Install remote login tools only when needed
-        if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true' && steps.queue.outputs.needs_login == 'true'
-        shell: bash
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y xvfb x11vnc novnc websockify
-          curl -fsSL --retry 3 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
-          chmod +x /tmp/cloudflared
-          sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
-
       - name: Process up to six queued jobs
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         continue-on-error: true
-        shell: bash
         run: |
-          for n in 1 2 3 4 5 6; do
-            python -m agent.airtable_worker --once || echo "Worker attempt $n failed; continuing closed loop."
-          done
-
+          for n in 1 2 3 4 5 6; do python -m agent.airtable_worker --once || echo "Worker attempt $n failed"; done
       - name: Re-measure Agent 0 objectives after execution
         if: always() && steps.config.outputs.ready == 'true'
         continue-on-error: true
-        shell: bash
         run: python -m agent.ceo_supervisor
-
       - name: Run routed LLM repair agent after operational queue
         if: always() && steps.config.outputs.ready == 'true' && (env.OPENAI_API_KEY != '' || env.GOOGLE_API_KEY != '' || env.GOOGLE_API_KEY_2 != '' || env.ANTHROPIC_API_KEY != '')
         continue-on-error: true
-        shell: bash
         run: python -m agent.repair_agent
