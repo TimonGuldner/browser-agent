@@ -1,0 +1,48 @@
+name: Test Gemini 3.6 Flash
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-gemini-36.yml'
+
+jobs:
+  test-gemini:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Gemini 3.6 Flash
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GOOGLE_API_KEY:-}" ]]; then
+            echo "GOOGLE_API_KEY missing"
+            exit 2
+          fi
+          BODY=$(mktemp)
+          HTTP=$(curl -sS -o "$BODY" -w "%{http_code}" \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GOOGLE_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d '{"contents":[{"parts":[{"text":"Reply with exactly: OK"}]}],"generationConfig":{"maxOutputTokens":64}}')
+          echo "HTTP_STATUS=$HTTP"
+          python - "$BODY" <<'PY'
+          import json, sys
+          p=sys.argv[1]
+          try:
+              d=json.load(open(p))
+          except Exception:
+              print(open(p).read()[:2000])
+              raise
+          if 'error' in d:
+              e=d['error']
+              print('ERROR_CODE=', e.get('code'))
+              print('ERROR_STATUS=', e.get('status'))
+              print('ERROR_MESSAGE=', e.get('message'))
+          else:
+              text=''.join(part.get('text','') for c in d.get('candidates',[]) for part in c.get('content',{}).get('parts',[]))
+              print('MODEL_RESPONSE=', text.strip())
+              print('FINISH_REASON=', (d.get('candidates') or [{}])[0].get('finishReason'))
+          PY
+          [[ "$HTTP" == "200" ]]
