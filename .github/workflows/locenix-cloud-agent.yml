@@ -126,6 +126,15 @@ jobs:
         shell: bash
         run: python -m agent.ceo_supervisor
 
+      - name: Agent 0 prepare approved email quota gap
+        if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
+        continue-on-error: true
+        env:
+          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+          EMAIL_DAILY_LIMIT: '20'
+        shell: bash
+        run: python -u -m agent.email_quota_enforcer
+
       - name: Close approved email quota gap
         if: steps.config.outputs.ready == 'true' && env.RESEND_API_KEY != '' && env.AIRTABLE_PAT != ''
         continue-on-error: true
@@ -136,7 +145,7 @@ jobs:
           EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
           EMAIL_REPLY_TO: 'hello@locenix.com'
         shell: bash
-        run: python -m agent.email_outreach_worker
+        run: python -u -m agent.email_outreach_worker
 
       - name: Run deterministic technical supervisor
         if: steps.config.outputs.ready == 'true'
