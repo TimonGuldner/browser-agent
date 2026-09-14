@@ -17,7 +17,10 @@ values ('locenix_company_budget_v1',
   '{"limit_eur":30,"reserve_eur":3,"strong_model_limit_eur":4.5,"usd_to_eur_guard_rate":1.0,"policy":"conservative_until_trusted_fx"}'::jsonb)
 on conflict (key) do update set value=excluded.value, updated_at=now();
 
-create or replace view public.company_budget_status
+drop view if exists public.company_mission_control;
+drop view if exists public.company_budget_status;
+
+create view public.company_budget_status
 with (security_invoker=true) as
 with month_window as (
   select
@@ -40,7 +43,7 @@ select 30.0000::numeric as limit_eur,
        1.000000::numeric as usd_to_eur_guard_rate
 from totals;
 
-create or replace view public.company_mission_control
+create view public.company_mission_control
 with (security_invoker=true) as
 select
   now() as observed_at,
