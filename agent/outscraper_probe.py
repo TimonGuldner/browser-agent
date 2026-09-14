@@ -1,8 +1,9 @@
-"""Small, read-only Outscraper probe for LOCENIX lead-source validation.
+"""Read-only Outscraper diagnostics for LOCENIX.
 
-This intentionally does NOT write to Airtable/Supabase and does NOT perform outreach.
-It follows Outscraper's documented Google Maps async flow with a minimal request,
-waits before polling, and prints a redacted summary.
+No Airtable/Supabase writes and no outreach. This probe tests two official Maps paths:
+1) async request followed through the returned results_location URL, and
+2) a tiny synchronous request for comparison.
+All output is redacted to structural metadata and business-level summary fields.
 """
 from __future__ import annotations
 
@@ -89,7 +90,6 @@ def _website_host(place: dict[str, Any]) -> str | None:
 
 
 def _payload_shape(payload: Any) -> dict[str, Any]:
-    """Return only structural diagnostics; never dump emails or profile URLs."""
     shape: dict[str, Any] = {"payload_type": type(payload).__name__}
     if isinstance(payload, dict):
         shape["top_level_keys"] = sorted(str(k) for k in payload.keys())[:30]
@@ -109,13 +109,16 @@ def _payload_shape(payload: Any) -> dict[str, Any]:
             shape["data_keys"] = sorted(str(k) for k in data.keys())[:30]
         elif isinstance(data, str):
             shape["data_is_url"] = data.startswith(("http://", "https://"))
+    elif isinstance(payload, list):
+        shape["list_len"] = len(payload)
+        if payload:
+            shape["first_type"] = type(payload[0]).__name__
     return shape
 
 
 def _extract_places(payload: Any) -> list[dict[str, Any]]:
     raw: Any = payload.get("data") if isinstance(payload, dict) else payload
     direct: list[dict[str, Any]] = []
-
     if isinstance(raw, list):
         if all(isinstance(item, dict) for item in raw):
             direct = [item for item in raw if isinstance(item, dict)]
@@ -131,13 +134,10 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
                 direct.extend(item for item in value if isinstance(item, dict))
 
-    candidates = direct
-    if not candidates:
-        candidates = [
-            d for d in _walk(payload)
-            if any(k in d for k in ("name", "title", "place_id", "google_id", "full_address"))
-        ]
-
+    candidates = direct or [
+        d for d in _walk(payload)
+        if any(k in d for k in ("name", "title", "place_id", "google_id", "full_address"))
+    ]
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for d in candidates:
@@ -150,47 +150,72 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_seconds: int) -> Any:
-    # Outscraper docs say async jobs are usually ready within 1-3 minutes and
-    # recommend waiting before checking. Poll slowly to avoid hammering the archive endpoint.
-    initial_wait = min(60, max_wait_seconds)
+def _safe_results_location(raw: Any) -> str | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not (host == "outscraper.com" or host.endswith(".outscraper.com")):
+        return None
+    return value
+
+
+def _fetch_async_result(client: httpx.Client, key: str, request_id: str, results_location: str | None, max_wait: int) -> Any:
+    target = results_location or REQUEST_URL.format(request_id=request_id)
+    source = "results_location" if results_location else "request_id_fallback"
+    print(json.dumps({"async_poll_source": source, "results_location_host": urlparse(target).hostname}, ensure_ascii=False))
+
+    initial_wait = min(60, max_wait)
     print(f"initial_wait_seconds={initial_wait}")
     time.sleep(initial_wait)
-
-    deadline = time.monotonic() + max(0, max_wait_seconds - initial_wait)
-    poll_seconds = 60
+    deadline = time.monotonic() + max(0, max_wait - initial_wait)
     attempt = 0
 
     while time.monotonic() <= deadline:
         attempt += 1
-        response = client.get(
-            REQUEST_URL.format(request_id=request_id),
-            headers={"X-API-KEY": key},
-            timeout=30.0,
-        )
-        print(f"poll={attempt} HTTP={response.status_code}")
-
+        response = client.get(target, headers={"X-API-KEY": key}, timeout=30.0)
+        print(f"async_poll={attempt} HTTP={response.status_code}")
         if response.status_code == 204:
-            raise RuntimeError("Outscraper request archive returned 204 (Failure/no results)")
+            raise RuntimeError("Outscraper async result returned 204")
         if response.status_code != 200:
-            print(response.text[:1000])
+            print(response.text[:500])
             response.raise_for_status()
-
         body = response.json()
-        status = str(body.get("status", "")).strip().lower()
-        print(json.dumps({"request_id": request_id, "status": body.get("status")}, ensure_ascii=False))
-
-        if status == "success":
-            print(json.dumps({"success_payload_shape": _payload_shape(body)}, ensure_ascii=False))
+        status = str(body.get("status", "")).strip().lower() if isinstance(body, dict) else "success"
+        print(json.dumps({"request_id": request_id, "status": body.get("status") if isinstance(body, dict) else None}, ensure_ascii=False))
+        if status in ("success", ""):
+            print(json.dumps({"async_payload_shape": _payload_shape(body)}, ensure_ascii=False))
             return body
         if status == "failure":
-            raise RuntimeError(f"Outscraper request failed: {json.dumps(body, ensure_ascii=False)[:1000]}")
-
-        if time.monotonic() + poll_seconds > deadline:
+            raise RuntimeError(f"Outscraper async request failed: {json.dumps(body, ensure_ascii=False)[:500]}")
+        if time.monotonic() + 60 > deadline:
             break
-        time.sleep(poll_seconds)
+        time.sleep(60)
+    raise TimeoutError(f"Outscraper async request {request_id} timed out after {max_wait}s")
 
-    raise TimeoutError(f"Outscraper request {request_id} did not finish within {max_wait_seconds}s")
+
+def _summary(payload: Any, limit: int) -> dict[str, Any]:
+    places = _extract_places(payload)[:limit]
+    rows = []
+    for place in places:
+        linkedin = _linkedin_values(place)
+        rows.append({
+            "name": _first(place, "name", "title"),
+            "website_host": _website_host(place),
+            "rating": _first(place, "rating"),
+            "reviews": _first(place, "reviews", "reviews_count", "reviews_number"),
+            "linkedin_count": len(linkedin),
+            "linkedin_types": _linkedin_types(linkedin),
+            "email_count": _email_count(place),
+        })
+    return {
+        "places_detected": len(places),
+        "with_website": sum(1 for x in rows if x["website_host"]),
+        "with_linkedin": sum(1 for x in rows if x["linkedin_count"] > 0),
+        "with_email": sum(1 for x in rows if x["email_count"] > 0),
+        "results": rows,
+    }
 
 
 def main() -> int:
@@ -200,81 +225,74 @@ def main() -> int:
         return 2
 
     query = os.getenv("OUTSCRAPER_TEST_QUERY", "restaurants, Cologne, Germany")
-    limit = max(1, min(int(os.getenv("OUTSCRAPER_TEST_LIMIT", "3")), 10))
-    max_wait = max(120, min(int(os.getenv("OUTSCRAPER_MAX_WAIT_SECONDS", "600")), 1200))
+    limit = max(1, min(int(os.getenv("OUTSCRAPER_TEST_LIMIT", "3")), 3))
+    max_wait = max(120, min(int(os.getenv("OUTSCRAPER_MAX_WAIT_SECONDS", "600")), 900))
+    headers = {"X-API-KEY": key}
 
-    # Minimal documented request: query + required limit + async.
-    # No language/region/enrichment/flat until the base Maps call is proven stable.
-    params = [
-        ("query", query),
-        ("limit", str(limit)),
-        ("async", "true"),
-    ]
-
-    print(json.dumps({"probe": "outscraper_maps_minimal_async", "query": query, "limit": limit}, ensure_ascii=False))
-
+    async_payload: Any = None
+    sync_payload: Any = None
     request_id = ""
+
     with httpx.Client() as client:
-        response = client.get(API_URL, params=params, headers={"X-API-KEY": key}, timeout=30.0)
-        print(f"submit HTTP {response.status_code}")
+        print(json.dumps({"probe": "outscraper_results_location_plus_sync", "query": query, "limit": limit}, ensure_ascii=False))
 
-        if response.status_code not in (200, 202):
-            print(response.text[:1000])
-            return 1
-
-        submitted = response.json()
-        status = str(submitted.get("status", "")).strip().lower()
-        request_id = str(submitted.get("id", "")).strip()
-        print(json.dumps({
-            "request_id": request_id or None,
-            "status": submitted.get("status"),
-            "response_keys": sorted(str(k) for k in submitted.keys())[:30],
-        }, ensure_ascii=False))
-
-        if status == "success":
-            payload = submitted
-            print(json.dumps({"success_payload_shape": _payload_shape(payload)}, ensure_ascii=False))
-        else:
-            if not request_id:
-                print("Async Outscraper response did not include a request id.")
-                print(json.dumps(submitted, ensure_ascii=False)[:1000])
-                return 1
+        async_response = client.get(
+            API_URL,
+            params=[("query", query), ("limit", str(limit)), ("async", "true")],
+            headers=headers,
+            timeout=30.0,
+        )
+        print(f"async_submit_HTTP={async_response.status_code}")
+        if async_response.status_code in (200, 202):
+            submitted = async_response.json()
+            request_id = str(submitted.get("id", "")).strip() if isinstance(submitted, dict) else ""
+            results_location = _safe_results_location(submitted.get("results_location") if isinstance(submitted, dict) else None)
+            print(json.dumps({
+                "request_id": request_id or None,
+                "status": submitted.get("status") if isinstance(submitted, dict) else None,
+                "response_keys": sorted(str(k) for k in submitted.keys()) if isinstance(submitted, dict) else [],
+                "has_valid_results_location": bool(results_location),
+            }, ensure_ascii=False))
             try:
-                payload = _wait_for_result(client, key, request_id, max_wait)
+                status = str(submitted.get("status", "")).strip().lower() if isinstance(submitted, dict) else ""
+                async_payload = submitted if status == "success" else _fetch_async_result(client, key, request_id, results_location, max_wait)
             except Exception as exc:
-                print(f"ERROR: {type(exc).__name__}: {exc}")
-                return 1
+                print(f"ASYNC_ERROR: {type(exc).__name__}: {exc}")
+        else:
+            print(async_response.text[:500])
 
-    places = _extract_places(payload)[:limit]
-    summary = []
-    for place in places:
-        linkedin = _linkedin_values(place)
-        summary.append({
-            "name": _first(place, "name", "title"),
-            "website_host": _website_host(place),
-            "rating": _first(place, "rating"),
-            "reviews": _first(place, "reviews", "reviews_count", "reviews_number"),
-            "linkedin_count": len(linkedin),
-            "linkedin_types": _linkedin_types(linkedin),
-            "email_count": _email_count(place),
-        })
+        # Independent tiny synchronous control test. This is diagnostic only.
+        print("starting_sync_control_test=true")
+        try:
+            sync_response = client.get(
+                API_URL,
+                params=[("query", query), ("limit", str(limit)), ("async", "false")],
+                headers=headers,
+                timeout=240.0,
+            )
+            print(f"sync_HTTP={sync_response.status_code}")
+            if sync_response.status_code == 200:
+                sync_payload = sync_response.json()
+                print(json.dumps({"sync_payload_shape": _payload_shape(sync_payload)}, ensure_ascii=False))
+            else:
+                print(sync_response.text[:500])
+        except Exception as exc:
+            print(f"SYNC_ERROR: {type(exc).__name__}: {exc}")
 
-    result = {
+    async_summary = _summary(async_payload, limit) if async_payload is not None else None
+    sync_summary = _summary(sync_payload, limit) if sync_payload is not None else None
+    print(json.dumps({
         "request_id": request_id or None,
-        "places_detected": len(places),
-        "with_website": sum(1 for item in summary if item["website_host"]),
-        "with_linkedin": sum(1 for item in summary if item["linkedin_count"] > 0),
-        "with_personal_linkedin": sum(1 for item in summary if "personal_profile" in item["linkedin_types"]),
-        "with_company_linkedin": sum(1 for item in summary if "company_page" in item["linkedin_types"]),
-        "with_email": sum(1 for item in summary if item["email_count"] > 0),
-        "results": summary,
-    }
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+        "async_summary": async_summary,
+        "sync_summary": sync_summary,
+    }, ensure_ascii=False, indent=2))
 
-    if not places:
-        print("ERROR: Outscraper returned Success but the documented data array contained no places.")
-        return 3
-    return 0
+    async_places = (async_summary or {}).get("places_detected", 0)
+    sync_places = (sync_summary or {}).get("places_detected", 0)
+    if async_places or sync_places:
+        return 0
+    print("ERROR: Neither official async results_location nor synchronous Maps path returned any places.")
+    return 3
 
 
 if __name__ == "__main__":
