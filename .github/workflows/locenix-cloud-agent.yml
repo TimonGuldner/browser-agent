@@ -36,7 +36,7 @@ jobs:
       ANTHROPIC_DEFAULT_MODEL: claude-sonnet-4-6
       MONTHLY_LLM_BUDGET_USD: "10"
       EMAIL_DAILY_LIMIT: "20"
-      AGENT_WORKER_ID: github-actions-airtable-router-v1
+      AGENT_WORKER_ID: GITHUB_BROWSER_WORKER\n      LOCENIX_AGENT_ID: GITHUB_BROWSER_WORKER\n      LOCENIX_DEPARTMENT: DISTRIBUTION
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
       MAX_RUNTIME_SECONDS: "1200"
@@ -105,6 +105,10 @@ jobs:
         continue-on-error: true
         run: |
           curl --fail --silent --show-error -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Content-Type: application/json" -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
+      - name: WATCHDOG — detect and resolve incidents
+        if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
+        run: python -u -m agent.control_plane watchdog
       - name: OPS — check queue
         if: steps.config.outputs.ready == 'true'
         id: queue

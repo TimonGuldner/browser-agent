@@ -124,6 +124,15 @@ class ControlPlaneClient:
         payload = {f"p_{key}": value for key, value in overrides.items()}
         return self.rpc("company_watchdog_scan", payload)
 
+    def finish_run(self, run_id: str, status: str = "completed", summary: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+        return self.rpc("company_finish_run", {"p_run_id": run_id, "p_status": status, "p_summary": summary or {}})
+
+    def cancel_task(self, task_id: str, reason: str) -> None:
+        self.rpc("company_cancel_task", {"p_task_id": task_id, "p_reason": reason})
+
+    def strategy_review(self, run_id: str) -> str:
+        return str(self.rpc("company_ceo_strategy_review", {"p_run_id": run_id}))
+
     def budget(self) -> Mapping[str, Any]:
         rows = self.get("company_budget_status", "select=*")
         return rows[0] if rows else {}
