@@ -2,4 +2,4 @@ LOCENIX hierarchical closed-loop wake.
 Agent 0 CEO -> Sales Head / Growth Head / Ops Head.
 Revenue opportunities outrank cold activity; compliance remains fail-closed.
 Deterministic workers handle side effects; LLM only where language/interpretation is needed.
-Wake: 2026-09-14 — run full MEASURE -> DELEGATE -> EXECUTE -> VERIFY -> ESCALATE cycle after architecture refactor.
+Wake: 2026-09-14 — Sales Head now actively closes qualified-lead pipeline gaps; run MEASURE -> DELEGATE -> EXECUTE -> VERIFY -> ESCALATE now.
