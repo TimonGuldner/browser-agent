@@ -10,14 +10,14 @@ on:
       - 'agent/company_foundation.py'
       - 'agent/org_architecture.py'
       - 'tests/test_company_foundation.py'
-      - 'sql/migrations/20260914_autonomous_company_foundation.sql'
+      - 'sql/migrations/*autonomous_company*.sql'
       - '.github/workflows/foundation-tests.yml'
   pull_request:
     paths:
       - 'agent/company_foundation.py'
       - 'agent/org_architecture.py'
       - 'tests/test_company_foundation.py'
-      - 'sql/migrations/20260914_autonomous_company_foundation.sql'
+      - 'sql/migrations/*autonomous_company*.sql'
 
 permissions:
   contents: read
