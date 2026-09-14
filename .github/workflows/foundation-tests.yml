@@ -1,0 +1,37 @@
+name: LOCENIX Autonomous Company Foundation Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'autonomous-company/**'
+    paths:
+      - 'agent/company_foundation.py'
+      - 'agent/org_architecture.py'
+      - 'tests/test_company_foundation.py'
+      - 'sql/migrations/20260914_autonomous_company_foundation.sql'
+      - '.github/workflows/foundation-tests.yml'
+  pull_request:
+    paths:
+      - 'agent/company_foundation.py'
+      - 'agent/org_architecture.py'
+      - 'tests/test_company_foundation.py'
+      - 'sql/migrations/20260914_autonomous_company_foundation.sql'
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile foundation
+        run: python -m compileall -q agent
+      - name: Run deterministic foundation tests
+        run: python -m unittest tests.test_company_foundation -v

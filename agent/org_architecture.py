@@ -55,3 +55,64 @@ BLOCKER_CODES = {
     "AUTH_REQUIRED", "CAPTCHA", "API_LIMIT", "NO_APPROVED_EMAIL_LEADS", "NO_QUALIFIED_LEADS",
     "PROVIDER_FAILURE", "COMPLIANCE_BLOCK", "BROWSER_FAILURE",
 }
+
+
+# Run 1 canonical company taxonomy. Existing Head/worker names stay valid through
+# LEGACY_ROLE_MAP so current jobs keep running while orchestration migrates.
+CANONICAL_COMPANY = {
+    "CEO": {"parent": None, "owns": ("mission", "priorities", "human_gates")},
+    "CMO": {"parent": "CEO", "owns": ("growth_portfolio", "go_to_market")},
+    "CTO": {"parent": "CEO", "owns": ("runtime", "repairs", "deployments")},
+    "CFO": {"parent": "CEO", "owns": ("budget", "cost_ledger")},
+    "OPPORTUNITY": {"parent": "CMO", "owns": ("demand_signals", "experiments")},
+    "DISTRIBUTION": {"parent": "CMO", "owns": ("channels", "qualified_traffic")},
+    "OUTREACH": {"parent": "CMO", "owns": ("permission_gates", "conversations")},
+    "CONVERSION": {"parent": "CMO", "owns": ("checks", "trials", "paid")},
+    "ANALYTICS": {"parent": "CMO", "owns": ("metrics", "attribution", "learning")},
+    "WATCHDOG": {"parent": "CEO", "owns": ("health", "incidents", "escalation")},
+}
+
+LEGACY_ROLE_MAP = {
+    "AGENT_0_CEO": "CEO",
+    "SALES_HEAD": "CMO",
+    "GROWTH_HEAD": "CMO",
+    "OPS_HEAD": "CTO",
+    "MAPS_OUTSCRAPER_WORKER": "OPPORTUNITY",
+    "CONTACT_ENRICHMENT_WORKER": "OPPORTUNITY",
+    "QUALIFICATION_WORKER": "OPPORTUNITY",
+    "CHANNEL_TRAFFIC_AGENT": "DISTRIBUTION",
+    "LINKEDIN_RESEARCH_WORKER": "DISTRIBUTION",
+    "ENGAGEMENT_WORKER": "DISTRIBUTION",
+    "EMAIL_COPY_AGENT": "OUTREACH",
+    "EMAIL_SENDER_WORKER": "OUTREACH",
+    "DM_AGENT": "OUTREACH",
+    "CONVERSATION_AGENT": "CONVERSION",
+    "FOLLOWUP_WORKER": "CONVERSION",
+    "ANALYTICS_LEARNING_AGENT": "ANALYTICS",
+    "LLM_ROUTER": "CFO",
+    "QUEUE_MANAGER": "CTO",
+    "SCHEDULER": "CTO",
+    "RETRY_CONTROLLER": "WATCHDOG",
+    "REPAIR_AGENT": "CTO",
+    "WATCHDOG": "WATCHDOG",
+}
+
+
+def canonical_role(role: str) -> str:
+    key = str(role or "").strip().upper()
+    canonical = LEGACY_ROLE_MAP.get(key, key)
+    if canonical not in CANONICAL_COMPANY:
+        raise ValueError(f"Unknown LOCENIX company role: {role}")
+    return canonical
+
+
+def validate_company_model() -> None:
+    for role, config in CANONICAL_COMPANY.items():
+        parent = config["parent"]
+        if role == "CEO" and parent is not None:
+            raise RuntimeError("CEO must be the root")
+        if parent is not None and parent not in CANONICAL_COMPANY:
+            raise RuntimeError(f"{role} references unknown parent {parent}")
+
+
+validate_company_model()
