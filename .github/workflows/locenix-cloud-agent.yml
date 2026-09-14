@@ -1,21 +1,16 @@
-name: LOCENIX Cost-Optimized Browser Agent
-
+name: LOCENIX Hierarchical Closed Loop
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - wake.txt
+    paths: [wake.txt]
   schedule:
     - cron: "*/10 * * * *"
-
 permissions:
   contents: write
-
 concurrency:
   group: locenix-browser-agent
   cancel-in-progress: false
-
 jobs:
   run-agent:
     runs-on: ubuntu-latest
@@ -26,118 +21,114 @@ jobs:
       AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
       AIRTABLE_BASE_ID: appN6ox7fjGFyXZhL
       AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
+      AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_API_KEY_2: ${{ secrets.OPENAI_API_KEY_2 }}
-      OPENAI_API_KEY_3: ${{ secrets.OPENAI_API_KEY_3 }}
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       GOOGLE_API_KEY_2: ${{ secrets.GOOGLE_API_KEY_2 }}
-      GOOGLE_API_KEY_3: ${{ secrets.GOOGLE_API_KEY_3 }}
-      GOOGLE_API_KEY_4: ${{ secrets.GOOGLE_API_KEY_4 }}
-      GOOGLE_API_KEY_5: ${{ secrets.GOOGLE_API_KEY_5 }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_API_KEY_2: ${{ secrets.ANTHROPIC_API_KEY_2 }}
       BROWSER_USE_API_KEY: ${{ secrets.BROWSER_USE_API_KEY }}
       GOOGLE_DEFAULT_MODEL: gemini-3.6-flash
       GOOGLE_LITE_MODELS: gemini-2.5-flash-lite
       GOOGLE_FLASH_MODELS: gemini-3.6-flash
       OPENAI_DEFAULT_MODEL: gpt-5.6-luna
       ANTHROPIC_DEFAULT_MODEL: claude-sonnet-4-6
-      OPENAI_MODEL: gpt-5.6-luna
       MONTHLY_LLM_BUDGET_USD: "10"
-      INBOX_FORCE_LLM_HOURS: "4"
+      EMAIL_DAILY_LIMIT: "20"
       AGENT_WORKER_ID: github-actions-airtable-router-v1
       PROFILE_BUCKET: locenix-agent-private
       PROFILE_OBJECT: profiles/locenix-linkedin.tar.gz.enc
-      LOGIN_TIMEOUT_SECONDS: "900"
       MAX_RUNTIME_SECONDS: "1200"
-
     steps:
       - name: Check configuration
         id: config
-        shell: bash
         run: |
-          if [[ -z "$SUPABASE_SERVICE_ROLE_KEY" ]]; then echo "ready=false" >> "$GITHUB_OUTPUT"; else echo "ready=true" >> "$GITHUB_OUTPUT"; fi
-      - name: Checkout
+          if [[ -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
         if: steps.config.outputs.ready == 'true'
-        uses: actions/checkout@v4
-      - name: Set up Python
+      - uses: actions/setup-python@v5
         if: steps.config.outputs.ready == 'true'
-        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install Python dependencies
+      - name: Install and validate
         if: steps.config.outputs.ready == 'true'
         run: |
-          python -m pip install --upgrade pip
           pip install -e .
-      - name: Validate central LLM router
-        if: steps.config.outputs.ready == 'true'
-        run: |
           python -m compileall -q agent
           python -m agent.llm_router_selftest
-      - name: Run Agent 0 CEO measurement and objective sync
+      - name: MEASURE — Agent 0 CEO
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        run: python -m agent.ceo_supervisor
-      - name: Agent 0 measure email quota and delegate
+        run: python -u -m agent.ceo_supervisor
+      - name: DELEGATE — Sales Head
         if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
         continue-on-error: true
-        env:
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
-          EMAIL_DAILY_LIMIT: '20'
+        run: python -u -m agent.sales_head
+      - name: DELEGATE — Growth Head
+        if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
+        run: python -u -m agent.growth_head
+      - name: DELEGATE — Ops Head
+        if: steps.config.outputs.ready == 'true'
+        continue-on-error: true
+        run: python -u -m agent.ops_head
+      - name: SALES — Email controller measurement
+        if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
+        continue-on-error: true
         run: python -u -m agent.email_quota_enforcer
-      - name: Email Copy Agent prepare approved leads
+      - name: SALES — Email Copy Agent
         if: steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
         continue-on-error: true
         env:
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
-          EMAIL_COPY_LIMIT: '20'
+          EMAIL_COPY_LIMIT: "20"
         run: python -u -m agent.email_copy_worker
-      - name: Email Sender close approved quota gap
+      - name: SALES — Email Sender Worker
         if: steps.config.outputs.ready == 'true' && env.RESEND_API_KEY != '' && env.AIRTABLE_PAT != ''
         continue-on-error: true
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_PAT }}
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
-          EMAIL_DAILY_LIMIT: '20'
           EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
           EMAIL_REPLY_TO: 'hello@locenix.com'
         run: python -u -m agent.email_outreach_worker
-      - name: Run deterministic technical supervisor
+      - name: OPS — deterministic supervisor
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        run: python -m agent.supervisor
-      - name: Enforce Agent 8 LinkedIn daily gaps
+        run: python -u -m agent.supervisor
+      - name: SALES — LinkedIn closed-loop enforcer
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
-        run: python -m agent.linkedin_execution_enforcer_v3
-      - name: Enqueue due Supabase schedules
+        run: python -u -m agent.linkedin_execution_enforcer_v3
+      - name: OPS — enqueue schedules
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
         run: |
           curl --fail --silent --show-error -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Content-Type: application/json" -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
-      - name: Check queued work
+      - name: OPS — check queue
         if: steps.config.outputs.ready == 'true'
         id: queue
         continue-on-error: true
         run: |
           RESPONSE=$(curl --fail --silent --show-error "$SUPABASE_URL/rest/v1/agent_jobs?status=eq.queued&select=id,mode,priority&order=priority.desc,created_at.asc&limit=1" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY") || RESPONSE="[]"
-          if [[ "$RESPONSE" == "[]" ]]; then echo "has_work=false" >> "$GITHUB_OUTPUT"; echo "needs_login=false" >> "$GITHUB_OUTPUT"; else MODE=$(echo "$RESPONSE" | jq -r '.[0].mode // ""'); echo "has_work=true" >> "$GITHUB_OUTPUT"; if [[ "$MODE" == "login" ]]; then echo "needs_login=true" >> "$GITHUB_OUTPUT"; else echo "needs_login=false" >> "$GITHUB_OUTPUT"; fi; fi
-      - name: Install Chromium
+          if [[ "$RESPONSE" == "[]" ]]; then echo "has_work=false" >> "$GITHUB_OUTPUT"; else echo "has_work=true" >> "$GITHUB_OUTPUT"; fi
+      - name: OPS — install Chromium if required
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         run: python -m playwright install --with-deps chromium
-      - name: Process up to six queued jobs
+      - name: EXECUTE — bounded worker queue
         if: steps.config.outputs.ready == 'true' && steps.queue.outputs.has_work == 'true'
         continue-on-error: true
         run: |
-          for n in 1 2 3 4 5 6; do python -m agent.airtable_worker --once || echo "Worker attempt $n failed"; done
-      - name: Re-measure Agent 0 objectives after execution
+          for n in 1 2 3 4 5 6; do python -m agent.airtable_worker --once || echo "RETRY worker=$n"; done
+      - name: VERIFY — Sales Head
+        if: always() && steps.config.outputs.ready == 'true' && env.AIRTABLE_PAT != ''
+        continue-on-error: true
+        run: python -u -m agent.sales_head
+      - name: VERIFY — Agent 0 CEO
         if: always() && steps.config.outputs.ready == 'true'
         continue-on-error: true
-        run: python -m agent.ceo_supervisor
-      - name: Run routed LLM repair agent after operational queue
-        if: always() && steps.config.outputs.ready == 'true' && (env.OPENAI_API_KEY != '' || env.GOOGLE_API_KEY != '' || env.GOOGLE_API_KEY_2 != '' || env.ANTHROPIC_API_KEY != '')
+        run: python -u -m agent.ceo_supervisor
+      - name: ESCALATE — repair agent
+        if: always() && steps.config.outputs.ready == 'true' && (env.OPENAI_API_KEY != '' || env.GOOGLE_API_KEY != '' || env.ANTHROPIC_API_KEY != '')
         continue-on-error: true
-        run: python -m agent.repair_agent
+        run: python -u -m agent.repair_agent
