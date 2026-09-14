@@ -199,6 +199,7 @@ begin
  update public.company_runs set status=p_status,ended_at=now(),metadata=metadata||jsonb_build_object('summary',p_summary),updated_at=now()
  where id=p_run_id and status in('running','paused','created');
  if not found then raise exception 'run not finishable';end if;
+ update public.company_agents set status='idle',updated_at=now() where agent_id='CEO';
  perform public.company_record_event(p_run_id,'CEO','CEO',null,'run.'||p_status,p_status,'Run finished',0,p_summary);
  return jsonb_build_object('run_id',p_run_id,'status',p_status);
 end$function$;\n\nCREATE OR REPLACE FUNCTION public.company_heartbeat(p_agent_id text, p_status text DEFAULT 'running'::text, p_task_id uuid DEFAULT NULL::uuid, p_metadata jsonb DEFAULT '{}'::jsonb)
@@ -324,12 +325,12 @@ begin
  insert into public.company_incidents(fingerprint,failure_code,stage,severity,status,owner_department,diagnosis)
  select 'MISSING_HEARTBEAT:'||a.agent_id,'MISSING_HEARTBEAT','FAIL','medium','open','WATCHDOG','Enabled worker has never emitted a heartbeat'
  from public.company_agents a left join public.company_worker_heartbeats h on h.worker_id=a.agent_id
- where a.enabled and a.worker_type in('worker','browser_worker','service')and h.worker_id is null on conflict do nothing;
+ where a.enabled and a.worker_type='browser_worker'and h.worker_id is null on conflict do nothing;
  get diagnostics n=row_count;c:=c+n;
  insert into public.company_incidents(fingerprint,failure_code,stage,severity,status,owner_department,diagnosis)
  select 'DEAD_WORKER:'||h.worker_id,'DEAD_WORKER','FAIL','high','open','WATCHDOG','Worker heartbeat is stale'
  from public.company_worker_heartbeats h join public.company_agents a on a.agent_id=h.worker_id
- where a.enabled and h.last_seen_at<p_now-make_interval(mins=>p_dead_minutes)on conflict do nothing;
+ where a.enabled and a.worker_type='browser_worker' and h.last_seen_at<p_now-make_interval(mins=>p_dead_minutes)on conflict do nothing;
  get diagnostics n=row_count;c:=c+n;
  select count(*)into q from public.agent_jobs where status='queued'and available_at<=p_now;
  if q>=p_queue_threshold then
@@ -392,7 +393,7 @@ begin
   select * into t from public.agent_templates x where x.role_key=s.role_key and x.enabled;
   if not found then continue;end if;
   dept:=case lower(t.role_key)when'inbox'then'CONVERSION'when'lead'then'OPPORTUNITY'
-   when'growth'then'DISTRIBUTION'when'content'then'DISTRIBUTION'else coalesce((select department from public.company_agents where agent_id=t.role_key),'CTO')end;
+   when'growth'then'DISTRIBUTION'when'content'then'DISTRIBUTION'when'outreach'then'OUTREACH'else coalesce((select department from public.company_agents where agent_id=t.role_key),'CTO')end;
   for slot in select gs from generate_series(first_slot,p_now,interval'15 minutes')gs where gs>=s.active_from loop
    lt:=slot at time zone s.timezone;
    if extract(minute from lt)::int<>s.run_minute then continue;end if;
