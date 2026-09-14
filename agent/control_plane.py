@@ -189,6 +189,8 @@ class CEOOrchestrator:
             )
             return {"status": "targets_met"}
         payload = {
+            "runtime_adapter": "growth",
+            "urls": ["https://locenix.com/blog/google-maps-ranking-verbessern"],
             "outcome_metric": decision.outcome,
             "target": str(decision.target),
             "actual": str(decision.actual),
@@ -196,7 +198,7 @@ class CEOOrchestrator:
             "rule": "business_outcome_priority",
         }
         task_id = self.control.create_task(
-            run_id, decision.department, f"grow_{decision.outcome}",
+            run_id, decision.department, "growth_convert" if decision.department == "CONVERSION" else "growth_discover",
             f"Produce verified incremental {decision.outcome}; current gap {decision.gap}.",
             decision.priority, payload, task_key(run_id, decision),
         )

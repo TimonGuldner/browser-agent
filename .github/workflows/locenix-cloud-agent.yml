@@ -107,6 +107,11 @@ jobs:
         continue-on-error: true
         run: |
           curl --fail --silent --show-error -X POST "$SUPABASE_URL/rest/v1/rpc/enqueue_due_agent_jobs" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Content-Type: application/json" -d '{"p_lookback_minutes":120}' >/tmp/scheduler.json
+      - name: GROWTH — deterministic execution and experiment deadlines
+        if: steps.config.outputs.ready == 'true'
+        env:
+          PRODUCT_GITHUB_TOKEN: ${{ secrets.PRODUCT_GITHUB_TOKEN }}
+        run: python -u -m agent.growth_execution tick
       - name: WATCHDOG — detect and resolve incidents
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true

@@ -41,9 +41,9 @@ def patch_record(record_id, fields):
         pass
 
 
-def send_resend(to, subject, text):
+def send_resend(to, subject, text, *, idempotency_key=None):
     payload = {"from": EMAIL_FROM, "to": [to], "reply_to": [EMAIL_REPLY_TO], "subject": subject, "text": text}
-    req = urllib.request.Request("https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers=resend_headers())
+    req = urllib.request.Request("https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers={**resend_headers(), **({"Idempotency-Key": idempotency_key} if idempotency_key else {})})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode())
