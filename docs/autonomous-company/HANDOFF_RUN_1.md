@@ -14,7 +14,7 @@ LOCENIX is not one empty project. The operating system is split across two activ
 - Airtable remains the current business-data system of record for LinkedIn growth, Sales Pipeline, Customer Success and SEO/content.
 - The connected Vercel team is on Pro but returned zero visible projects. The repository contains \`command-center/vercel.json\`, but a live Vercel deployment could not be verified through the connected account. GitHub also reports no deployments for either repository.
 
-At inventory time, the existing Supabase browser queue contained 226 jobs: 68 completed, 153 failed and 5 cancelled. It had 770 operational events, including 94 provider failovers, 50 repair escalations, 25 repair diagnoses and 25 supervisor retries. The existing monthly LLM-cost function reported **$4.193706**.
+At inventory time, the existing Supabase browser queue contained 226 jobs: 68 completed, 153 failed and 5 cancelled. It had 770 operational events, including 94 provider failovers, 50 repair escalations, 25 repair diagnoses and 25 supervisor retries. The existing monthly LLM-cost function reported **USD 4.193706**. Until a trusted FX adapter is connected, it is conservatively charged as **€4.193706** against the euro budget.
 
 A recursive workflow feedback loop was active in \`locenix-lead-research-agent\`: CEO dispatched departments, departments committed state and/or dispatched CEO, then CEO dispatched departments again. This produced commits and Actions runs every few seconds. The loop was stopped in commit \`d7b4fa612540fbcbda18bf8084be4f0e45ad3a8d\`; no loop-generated commit was observed after the already-queued runs drained at 15:38:41 UTC.
 
@@ -124,7 +124,7 @@ Verification result:
 - all 10 departments seeded
 - Mission Control view readable by service role
 - queued 0, running 0, failed historical jobs 153, open new-format incidents 0
-- monthly spend $4.193706, remaining $25.806294
+- monthly budget charge €4.193706, remaining €25.806294, hard stop false
 - no unindexed-foreign-key advisory remains for the new company tables
 - RLS is enabled with no public policies by design; the advisor reports this as informational because only the service role may access the control plane
 
@@ -159,18 +159,18 @@ Canonical path:
 
 Every transition is machine-owned until an explicit human-gate code occurs: CAPTCHA, 2FA, checkpoint/authwall, payment approval, legal approval, visual approval, account restriction or a genuine owner decision. A normal failure, provider outage or exhausted retry is not by itself an owner escalation.
 
-### $30 survival rules
+### €30 survival rules
 
-- hard monthly cap: $30
-- protected reserve: $3
-- strong-model sub-cap: $4.50
+- hard monthly cap: €30
+- protected reserve: €3
+- strong-model sub-cap: €4.50
 - strong model only for a genuinely difficult decision
 - deterministic code wins whenever it can decide safely
 - event-driven GitHub worker wake-ups; no permanently running paid agent
 - stable idempotency keys and queue uniqueness
 - delayed retry through \`available_at\`
 - batching/caching remain at worker and Airtable adapter boundaries
-- existing job-result LLM costs and new non-LLM/tool costs are combined in the budget view without creating a second billing authority
+- existing USD job-result costs are conservatively charged 1:1 in EUR until a trusted FX adapter exists; new tool costs carry explicit EUR normalization
 
 ## DATABASE DECISIONS
 
@@ -246,7 +246,7 @@ Run 1 stops here because:
 - the active recursive workflow loop was fixed and observed to drain;
 - the canonical minimal architecture was decided without introducing a second queue;
 - deterministic contracts and database foundations were implemented;
-- both database migrations succeeded;
+- all three database migrations succeeded;
 - Python compilation and deterministic foundation tests passed in GitHub Actions;
 - no dashboard or full Growth-agent fleet was built.
 
