@@ -67,58 +67,40 @@ def active_sales_roles() -> set[str]:
     return roles
 
 
-def enqueue(role: str, task: str, *, target: int, priority: int, phase: str) -> str:
-    payload = {
-        "status": "queued",
-        "task": task,
-        "mode": "autonomous",
-        "priority": priority,
-        "max_steps": 35,
-        "input": {
-            "agent_role": role,
-            "department_role": role,
-            "pipeline_phase": phase,
-            "target_new_profiles": target,
-            "target_actions": target,
-            "scheduled": False,
-            "source": "sales-head",
-            "owner": "SALES_HEAD",
-        },
-    }
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}/rest/v1/agent_jobs",
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers=supabase_headers(),
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        result = json.loads(r.read())
-    if not isinstance(result, list) or not result:
-        raise RuntimeError(f"Could not enqueue {role}")
-    return str(result[0]["id"])
+def lead_key(f: dict) -> str:
+    email = str(f.get("Email") or "").strip().lower()
+    lead_id = str(f.get("Lead ID") or "").strip().lower()
+    website = str(f.get("Website") or "").strip().lower().rstrip("/")
+    company = str(f.get("Company") or "").strip().lower()
+    return email or lead_id or website or company
 
 
 def main():
     today = datetime.now(ZoneInfo("Europe/Berlin")).date().isoformat()
     data = rows()
-    sent = set()
-    ready = 0
-    needs_copy = 0
-    qualified_today = 0
-    qualified_inventory = 0
+    sent: set[str] = set()
+    historically_sent: set[str] = {
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in data
+        if (r.get("fields") or {}).get("Email Sent At") and str((r.get("fields") or {}).get("Email") or "").strip()
+    }
+    ready: set[str] = set()
+    needs_copy: set[str] = set()
+    qualified_today_keys: set[str] = set()
+    qualified_inventory_keys: set[str] = set()
 
     for r in data:
         f = r.get("fields") or {}
         email = str(f.get("Email") or "").strip().lower()
         created = str(r.get("createdTime") or "")[:10]
-        is_qualified = (
-            str(f.get("Deep QA Decision") or "").upper() in {"PASS", "APPROVED", "QUALIFIED"}
-            or str(f.get("Sales Tier") or "").upper() in {"A", "B"}
-        )
-        if is_qualified:
-            qualified_inventory += 1
+        qa = str(f.get("Deep QA Decision") or "").upper()
+        tier = str(f.get("Sales Tier") or "").upper()
+        is_qualified = qa in {"PASS", "APPROVED", "QUALIFIED", "FINAL_A", "FINAL_B"} or tier in {"A", "B"}
+        key = lead_key(f)
+        if is_qualified and key:
+            qualified_inventory_keys.add(key)
             if created == today:
-                qualified_today += 1
+                qualified_today_keys.add(key)
         if (
             str(f.get("Email Sent At") or "")[:10] == today
             and str(f.get("Email Send Status") or "").upper() == "SENT"
@@ -126,33 +108,19 @@ def main():
             and email
         ):
             sent.add(email)
-        if f.get("Email Do Not Contact") or f.get("Intent Do Not Contact") or f.get("Email Sent At"):
+        if f.get("Email Do Not Contact") or f.get("Intent Do Not Contact") or f.get("Email Sent At") or email in historically_sent:
             continue
-        if email and f.get("Email Send Approved") and str(f.get("Email Legal Basis") or "").strip():
+        if email and f.get("Email Send Approved"):
             subject = str(f.get("Outreach Subject") or "").strip()
             body = str(f.get("Outreach Draft") or "").strip()
             if str(f.get("Email Send Status") or "").upper() == "READY_TO_SEND" and subject and body:
-                ready += 1
+                ready.add(email)
             elif not subject or not body:
-                needs_copy += 1
+                needs_copy.add(email)
 
     email_gap = max(0, EMAIL_TARGET - len(sent))
-    lead_gap = max(0, LEAD_TARGET - qualified_today)
+    lead_gap = max(0, LEAD_TARGET - len(qualified_today_keys))
     active = active_sales_roles()
-    delegated = []
-
-    # Sales Head owns the bottleneck. Create pipeline inventory first when today's
-    # qualified-lead target is missing. Existing active jobs make this idempotent.
-    if lead_gap and "lead" not in active:
-        job_id = enqueue(
-            "lead",
-            "Deterministically research new LOCENIX prospects for local-service businesses. Verify real business/profile data, deduplicate against Airtable, enrich useful contact/company data where available, and persist only verified records. Do not send outreach and do not invent facts. Stop after the requested number of new profiles or when deterministic sources are exhausted.",
-            target=min(20, lead_gap),
-            priority=90,
-            phase="research_v3",
-        )
-        delegated.append({"pipeline": "research", "role": "lead", "job_id": job_id, "target": min(20, lead_gap)})
-        active.add("lead")
 
     if email_gap == 0:
         next_action = "EMAIL_TARGET_REACHED"
@@ -161,8 +129,10 @@ def main():
     elif needs_copy:
         next_action = "EMAIL_COPY_AGENT"
     else:
-        next_action = "RESEARCH_ENRICHMENT_PIPELINE"
+        next_action = "SALES_LEAD_ENRICHMENT_REQUIRED"
 
+    # research_v3 creates LinkedIn People records, not canonical Sales Leads. Do not
+    # pretend that job closes the Sales qualified-lead gap; LinkedIn orchestration owns it.
     status = "TARGET_REACHED" if email_gap == 0 and lead_gap == 0 else "ACTION_REQUIRED"
     print(json.dumps({
         "department": "sales",
@@ -170,15 +140,16 @@ def main():
         "target": {"email_sends": EMAIL_TARGET, "qualified_leads": LEAD_TARGET},
         "actual": {
             "email_sends": len(sent),
-            "qualified_leads_today": qualified_today,
-            "qualified_inventory": qualified_inventory,
+            "qualified_leads_today_unique": len(qualified_today_keys),
+            "qualified_inventory_unique": len(qualified_inventory_keys),
         },
         "gap": {"email_sends": email_gap, "qualified_leads": lead_gap},
-        "capacity": {"ready_to_send": ready, "approved_needing_copy": needs_copy},
+        "capacity": {"ready_to_send_unique": len(ready), "approved_needing_copy_unique": len(needs_copy)},
         "active_roles": sorted(active),
-        "delegated_jobs": delegated,
+        "delegated_jobs": [],
         "next_action": next_action,
-        "rule": "Sales Head coordinates workers; Agent 0 does not perform sales operations.",
+        "data_quality": {"raw_records": len(data), "unique_qualified_inventory": len(qualified_inventory_keys)},
+        "rule": "Sales Head coordinates workers; counts are deduplicated. LinkedIn research is not counted as canonical Sales pipeline creation.",
     }, ensure_ascii=False))
 
 
