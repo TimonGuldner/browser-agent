@@ -149,6 +149,9 @@ create table if not exists public.company_cost_events (
   provider text not null,
   service text not null,
   amount_usd numeric(12,6) not null check (amount_usd >= 0),
+  currency text not null default 'USD',
+  fx_rate_to_eur numeric(12,6) not null default 1.000000 check (fx_rate_to_eur > 0),
+  amount_eur numeric(12,6) generated always as (amount_usd * fx_rate_to_eur) stored,
   job_id uuid references public.agent_jobs(id) on delete set null,
   experiment_id uuid references public.company_experiments(id) on delete set null,
   units jsonb not null default '{}'::jsonb,
@@ -241,18 +244,21 @@ with month_window as (
     (date_trunc('month', now() at time zone 'Europe/Berlin') + interval '1 month') at time zone 'Europe/Berlin' as ends_at
 ), ledger as (
   select
-    coalesce(sum(amount_usd) filter (where category='llm'),0) as llm_ledger,
-    coalesce(sum(amount_usd) filter (where category<>'llm'),0) as non_llm
+    coalesce(sum(amount_eur) filter (where category='llm'),0) as llm_ledger_eur,
+    coalesce(sum(amount_eur) filter (where category<>'llm'),0) as non_llm_eur
   from public.company_cost_events, month_window
   where occurred_at >= starts_at and occurred_at < ends_at
 ), totals as (
-  select greatest(public.agent_monthly_llm_cost(now()),llm_ledger)+non_llm as spent_usd
+  -- Existing job telemetry is USD. Until a trusted FX adapter exists, charge
+  -- USD 1:1 as EUR. This is deliberately conservative for the EUR hard cap.
+  select greatest(public.agent_monthly_llm_cost(now()),llm_ledger_eur)+non_llm_eur as spent_eur
   from ledger
 )
-select 30.0000::numeric as limit_usd,
-       spent_usd,
-       greatest(0::numeric,30.0000-spent_usd) as remaining_usd,
-       spent_usd >= 30.0000 as hard_stop
+select 30.0000::numeric as limit_eur,
+       spent_eur,
+       greatest(0::numeric,30.0000-spent_eur) as remaining_eur,
+       spent_eur >= 30.0000 as hard_stop,
+       1.000000::numeric as usd_to_eur_guard_rate
 from totals;
 
 create or replace view public.company_mission_control
@@ -263,8 +269,8 @@ select
   count(*) filter (where j.status='running')::int as running_jobs,
   count(*) filter (where j.status='failed')::int as failed_jobs,
   (select count(*)::int from public.company_incidents where status <> 'resolved') as open_incidents,
-  (select spent_usd from public.company_budget_status) as monthly_spend_usd,
-  (select remaining_usd from public.company_budget_status) as monthly_remaining_usd,
+  (select spent_eur from public.company_budget_status) as monthly_spend_eur,
+  (select remaining_eur from public.company_budget_status) as monthly_remaining_eur,
   (select count(*)::int from public.company_worker_heartbeats where last_seen_at > now()-interval '5 minutes') as live_workers
 from public.agent_jobs j;
 

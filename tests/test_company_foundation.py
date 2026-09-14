@@ -40,11 +40,11 @@ class CompanyFoundationTests(unittest.TestCase):
 
     def test_budget_hard_cap_reserve_and_strong_model_gate(self):
         policy = BudgetPolicy()
-        self.assertTrue(policy.authorize(spent_usd="4.19", committed_usd="0", requested_usd="0.10", essential=False).allowed)
-        self.assertEqual(policy.authorize(spent_usd="29.50", committed_usd="0", requested_usd="1", essential=True).reason, "MONTHLY_HARD_CAP")
-        self.assertEqual(policy.authorize(spent_usd="27.10", committed_usd="0", requested_usd="0.10", essential=False).reason, "RESERVE_PROTECTED")
-        self.assertEqual(policy.authorize(spent_usd="4", committed_usd="0", requested_usd="0.10", essential=True, model_tier="strong").reason, "STRONG_MODEL_NOT_JUSTIFIED")
-        self.assertTrue(policy.authorize(spent_usd=Decimal("4"), committed_usd=0, requested_usd=Decimal("0.10"), essential=True, model_tier="strong", difficult_decision=True).allowed)
+        self.assertTrue(policy.authorize(spent_eur="4.19", committed_eur="0", requested_eur="0.10", essential=False).allowed)
+        self.assertEqual(policy.authorize(spent_eur="29.50", committed_eur="0", requested_eur="1", essential=True).reason, "MONTHLY_HARD_CAP")
+        self.assertEqual(policy.authorize(spent_eur="27.10", committed_eur="0", requested_eur="0.10", essential=False).reason, "RESERVE_PROTECTED")
+        self.assertEqual(policy.authorize(spent_eur="4", committed_eur="0", requested_eur="0.10", essential=True, model_tier="strong").reason, "STRONG_MODEL_NOT_JUSTIFIED")
+        self.assertTrue(policy.authorize(spent_eur=Decimal("4"), committed_eur=0, requested_eur=Decimal("0.10"), essential=True, model_tier="strong", difficult_decision=True).allowed)
 
     def test_llm_is_exception_not_default(self):
         self.assertFalse(requires_llm(deterministic_available=True, ambiguous=True))

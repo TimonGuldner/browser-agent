@@ -136,43 +136,43 @@ class TaskEnvelope:
 class SpendDecision:
     allowed: bool
     reason: str
-    projected_usd: Decimal
-    remaining_usd: Decimal
+    projected_eur: Decimal
+    remaining_eur: Decimal
 
 
 @dataclass(frozen=True)
 class BudgetPolicy:
-    monthly_limit_usd: Decimal = Decimal("30.00")
-    reserve_usd: Decimal = Decimal("3.00")
-    strong_model_limit_usd: Decimal = Decimal("4.50")
+    monthly_limit_eur: Decimal = Decimal("30.00")
+    reserve_eur: Decimal = Decimal("3.00")
+    strong_model_limit_eur: Decimal = Decimal("4.50")
 
     def authorize(
         self,
         *,
-        spent_usd: Decimal | str | float,
-        committed_usd: Decimal | str | float,
-        requested_usd: Decimal | str | float,
+        spent_eur: Decimal | str | float,
+        committed_eur: Decimal | str | float,
+        requested_eur: Decimal | str | float,
         essential: bool,
         model_tier: str = "deterministic",
         difficult_decision: bool = False,
-        strong_model_spent_usd: Decimal | str | float = Decimal("0"),
+        strong_model_spent_eur: Decimal | str | float = Decimal("0"),
     ) -> SpendDecision:
-        spent = Decimal(str(spent_usd))
-        committed = Decimal(str(committed_usd))
-        requested = Decimal(str(requested_usd))
-        strong_spent = Decimal(str(strong_model_spent_usd))
+        spent = Decimal(str(spent_eur))
+        committed = Decimal(str(committed_eur))
+        requested = Decimal(str(requested_eur))
+        strong_spent = Decimal(str(strong_model_spent_eur))
         if min(spent, committed, requested, strong_spent) < 0:
             raise ValueError("cost values must not be negative")
         projected = spent + committed + requested
-        remaining = self.monthly_limit_usd - projected
-        if projected > self.monthly_limit_usd:
+        remaining = self.monthly_limit_eur - projected
+        if projected > self.monthly_limit_eur:
             return SpendDecision(False, "MONTHLY_HARD_CAP", projected, remaining)
         tier = str(model_tier or "").strip().lower()
         if tier == "strong" and not difficult_decision:
             return SpendDecision(False, "STRONG_MODEL_NOT_JUSTIFIED", projected, remaining)
-        if tier == "strong" and strong_spent + requested > self.strong_model_limit_usd:
+        if tier == "strong" and strong_spent + requested > self.strong_model_limit_eur:
             return SpendDecision(False, "STRONG_MODEL_CAP", projected, remaining)
-        if not essential and projected > self.monthly_limit_usd - self.reserve_usd:
+        if not essential and projected > self.monthly_limit_eur - self.reserve_eur:
             return SpendDecision(False, "RESERVE_PROTECTED", projected, remaining)
         return SpendDecision(True, "AUTHORIZED", projected, remaining)
 
