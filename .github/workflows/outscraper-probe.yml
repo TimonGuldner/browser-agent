@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 15
     env:
       OUTSCRAPER_API_KEY: ${{ secrets.OUTSCRAPER_API_KEY }}
-      OUTSCRAPER_TEST_QUERY: "restaurants, Cologne, Germany"
+      OUTSCRAPER_TEST_QUERY: "physiotherapist, Cologne, Germany"
       OUTSCRAPER_TEST_LIMIT: "5"
       OUTSCRAPER_MAX_WAIT_SECONDS: "600"
     steps:
