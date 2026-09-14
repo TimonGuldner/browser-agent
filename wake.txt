@@ -2,4 +2,4 @@ LOCENIX hierarchical closed-loop wake.
 Agent 0 CEO -> Sales Head / Growth Head / Ops Head.
 Revenue opportunities outrank cold activity; compliance remains fail-closed.
 Email Send Approved is the upstream authorization source of truth; DNC, terminal state, duplicate/history and technical readiness remain hard stops.
-Wake: 2026-09-14 — run approved email pipeline through COPY -> SEND -> VERIFY now.
+Wake: 2026-09-14 — process existing qualified inventory through COPY -> SEND -> VERIFY immediately; do not invent approval, legal basis, or facts.
