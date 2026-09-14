@@ -9,10 +9,8 @@ from datetime import datetime, timezone
 from agent.compliance_gate import email_gate
 
 AIRTABLE_BASE_ID = os.environ["AIRTABLE_SALES_BASE_ID"]
-AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQws5T")
-if AIRTABLE_TABLE_ID == "tblF4ghkYFzkeQws5T":
-    AIRTABLE_TABLE_ID = "tblF4ghkYFzkeQwsT"
-AIRTABLE_TOKEN = os.environ["AIRTABLE_TOKEN"]
+AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQwsT")
+AIRTABLE_TOKEN = (os.getenv("AIRTABLE_TOKEN") or os.getenv("AIRTABLE_PAT") or "").strip()
 RESEND_API_KEY = os.environ["RESEND_API_KEY"]
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "Timon Guldner <hello@locenix.com>")
 EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO", "hello@locenix.com")
@@ -20,6 +18,8 @@ DAILY_LIMIT = int(os.environ.get("EMAIL_DAILY_LIMIT", "20"))
 
 
 def airtable_headers():
+    if not AIRTABLE_TOKEN:
+        raise RuntimeError("AIRTABLE_TOKEN/AIRTABLE_PAT missing")
     return {"Authorization": f"Bearer {AIRTABLE_TOKEN}", "Content-Type": "application/json"}
 
 
@@ -47,26 +47,46 @@ def send_resend(to, subject, text):
         return json.loads(resp.read().decode())
 
 
-def list_candidates():
-    # Email Send Approved is the explicit upstream business authorization.
+def list_all(formula: str) -> list[dict]:
+    rows: list[dict] = []
+    offset = ""
+    while True:
+        params: list[tuple[str, str]] = [("pageSize", "100"), ("filterByFormula", formula)]
+        if offset:
+            params.append(("offset", offset))
+        payload = get_json(
+            f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{urllib.parse.urlencode(params)}",
+            airtable_headers(),
+        )
+        rows.extend(payload.get("records") or [])
+        offset = str(payload.get("offset") or "")
+        if not offset:
+            return rows
+
+
+def list_candidates() -> list[dict]:
     formula = "AND({Email Send Approved}=1,{Email Send Status}='READY_TO_SEND',{Email}!='',{Outreach Subject}!='',{Outreach Draft}!='')"
-    params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
-    return get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
+    return list_all(formula)
 
 
 def all_sent_emails() -> set[str]:
-    formula = "{Email Sent At}!=''"
-    params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
-    rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
-    return {str((r.get("fields") or {}).get("Email") or "").strip().lower() for r in rows if (r.get("fields") or {}).get("Email")}
+    rows = list_all("{Email Sent At}!=''")
+    return {
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in rows
+        if str((r.get("fields") or {}).get("Email") or "").strip()
+    }
 
 
 def sent_today_count() -> int:
     today = datetime.now(timezone.utc).date().isoformat()
     formula = f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'),{{Email Send Status}}='SENT',{{Email Message ID}}!='')"
-    params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
-    rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
-    return len({str((r.get("fields") or {}).get("Email") or "").strip().lower() for r in rows if (r.get("fields") or {}).get("Email")})
+    rows = list_all(formula)
+    return len({
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in rows
+        if str((r.get("fields") or {}).get("Email") or "").strip()
+    })
 
 
 def main():
@@ -76,9 +96,17 @@ def main():
         print(json.dumps({"status": "quota_reached", "sent_today": sent_today}))
         return
 
+    candidates = list_candidates()
     historically_sent = all_sent_emails()
-    seen, sent, errors, blocked = set(), [], [], []
-    for rec in list_candidates():
+    seen: set[str] = set()
+    sent: list[dict] = []
+    errors: list[dict] = []
+    blocked: list[dict] = []
+    duplicate_history_skipped = 0
+    duplicate_batch_skipped = 0
+    eligible_unique = 0
+
+    for rec in candidates:
         if len(sent) >= remaining:
             break
         f = rec.get("fields") or {}
@@ -89,15 +117,27 @@ def main():
         email = str(f.get("Email") or "").strip().lower()
         company = str(f.get("Company") or "").strip().lower()
         key = email or company
-        if not key or key in seen or email in historically_sent:
+        if not key:
+            continue
+        if email in historically_sent:
+            duplicate_history_skipped += 1
+            continue
+        if key in seen:
+            duplicate_batch_skipped += 1
             continue
         seen.add(key)
+        eligible_unique += 1
         try:
             out = send_resend(email, str(f["Outreach Subject"]), str(f["Outreach Draft"]))
             message_id = str(out.get("id") or "")
             if not message_id:
                 raise RuntimeError(f"No Resend id returned: {out}")
-            patch_record(rec["id"], {"Email Send Status": "SENT", "Email Message ID": message_id, "Email Sent At": datetime.now(timezone.utc).isoformat(), "Email Send Error": ""})
+            patch_record(rec["id"], {
+                "Email Send Status": "SENT",
+                "Email Message ID": message_id,
+                "Email Sent At": datetime.now(timezone.utc).isoformat(),
+                "Email Send Error": "",
+            })
             historically_sent.add(email)
             sent.append({"record": rec["id"], "email": email, "message_id": message_id})
         except Exception as exc:
@@ -107,7 +147,19 @@ def main():
                 pass
             errors.append({"record": rec.get("id"), "error": str(exc)})
 
-    print(json.dumps({"status": "completed", "sent_before": sent_today, "sent_now": len(sent), "sent": sent, "blocked": blocked, "errors": errors}, ensure_ascii=False))
+    print(json.dumps({
+        "status": "completed",
+        "sent_before": sent_today,
+        "candidate_records": len(candidates),
+        "historically_sent_unique": len(historically_sent) - len(sent),
+        "duplicate_history_skipped": duplicate_history_skipped,
+        "duplicate_batch_skipped": duplicate_batch_skipped,
+        "eligible_unique": eligible_unique,
+        "sent_now": len(sent),
+        "sent": sent,
+        "blocked": blocked,
+        "errors": errors,
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":
