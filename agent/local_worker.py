@@ -50,9 +50,12 @@ def update_job(db: Client, job_id: str, **fields: Any) -> None:
 
 
 def add_event(db: Client, job_id: str, event_type: str, message: str, data: dict[str, Any] | None = None) -> None:
-    db.table("agent_events").insert(
-        {"job_id": job_id, "event_type": event_type, "message": message, "data": data or {}}
-    ).execute()
+    status = "failed" if event_type.endswith("failed") else "completed" if event_type.endswith(("finished", "saved")) else "running"
+    db.rpc("company_record_event", {
+        "p_run_id": None, "p_agent_id": WORKER_ID, "p_department": None, "p_task_id": job_id,
+        "p_event_type": event_type, "p_status": status, "p_message": message,
+        "p_cost_eur": 0, "p_metadata": data or {},
+    }).execute()
 
 
 def claim_next_job(db: Client) -> dict[str, Any] | None:
@@ -415,7 +418,17 @@ async def run_agent_job(db: Client, job: dict[str, Any]) -> None:
             "model": OLLAMA_MODEL,
             "browser": "local-chromium-on-github-actions",
         }
-        update_job(db, job_id, status="completed" if history.is_successful() else "failed", result=result)
+        if history.is_successful() and job.get("run_id") and job.get("assigned_agent_id") == WORKER_ID:
+            db.rpc("company_complete_task", {
+                "p_task_id": job_id, "p_agent_id": WORKER_ID, "p_result": result,
+                "p_verification": {
+                    "passed": True,
+                    "evidence": "browser-use history reports is_done and is_successful",
+                    "is_done": history.is_done(),
+                },
+            }).execute()
+        else:
+            update_job(db, job_id, status="completed" if history.is_successful() else "failed", result=result)
         add_event(db, job_id, "browser.task_finished", "Local browser task finished", {"successful": history.is_successful()})
     finally:
         try:

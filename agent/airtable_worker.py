@@ -165,6 +165,10 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
             return
 
     os.environ["LOCENIX_AGENT_ROLE"] = role
+    os.environ["LOCENIX_TASK_ID"] = job_id
+    if job.get("run_id"):
+        os.environ["LOCENIX_RUN_ID"] = str(job["run_id"])
+    os.environ["LOCENIX_DEPARTMENT"] = str(job.get("department") or os.getenv("LOCENIX_DEPARTMENT", "DISTRIBUTION"))
     bounded_job = dict(job)
     bounded_job["max_steps"] = min(int(job.get("max_steps") or policy["max_steps"]), int(policy["max_steps"]))
 

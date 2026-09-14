@@ -167,6 +167,17 @@ class CEOOrchestrator:
     def __init__(self, control: ControlPlaneClient):
         self.control = control
 
+    def cycle(self, run_id: str) -> Mapping[str, Any]:
+        runs = self.control.get("company_runs", f"id=eq.{run_id}&status=eq.running&select=targets")
+        if not runs:
+            raise ControlPlaneError("active run not found")
+        rows = self.control.get("company_metric_events", f"run_id=eq.{run_id}&select=metric_key,value")
+        actuals: dict[str, Decimal] = {}
+        for row in rows:
+            key = str(row.get("metric_key") or "")
+            actuals[key] = actuals.get(key, Decimal("0")) + Decimal(str(row.get("value") or 0))
+        return self.delegate_gap(run_id, runs[0].get("targets") or {}, actuals)
+
     def delegate_gap(self, run_id: str, targets: Mapping[str, Any], actuals: Mapping[str, Any]) -> Mapping[str, Any]:
         decision = select_priority(targets, actuals)
         if decision is None:
@@ -207,9 +218,10 @@ def main() -> None:
     elif args.command == "start-run":
         output = cp.start_run(args.run_id or os.environ["LOCENIX_RUN_ID"])
     elif args.command == "ceo-cycle":
-        output = CEOOrchestrator(cp).delegate_gap(
-            args.run_id or os.environ["LOCENIX_RUN_ID"], json.loads(args.targets), json.loads(args.actuals)
-        )
+        run_id = args.run_id or os.environ["LOCENIX_RUN_ID"]
+        supplied_targets = json.loads(args.targets)
+        supplied_actuals = json.loads(args.actuals)
+        output = CEOOrchestrator(cp).delegate_gap(run_id, supplied_targets, supplied_actuals) if supplied_targets else CEOOrchestrator(cp).cycle(run_id)
     elif args.command == "watchdog":
         output = cp.watchdog()
     else:
