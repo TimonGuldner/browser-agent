@@ -53,31 +53,43 @@ def main():
     rows = all_rows()
     sent = sent_today(rows)
     gap = max(0, DAILY_TARGET - sent)
-    ready = 0
-    approved_needing_copy = 0
+    historically_sent = {
+        str((r.get("fields") or {}).get("Email") or "").strip().lower()
+        for r in rows
+        if (r.get("fields") or {}).get("Email Sent At") and str((r.get("fields") or {}).get("Email") or "").strip()
+    }
+    ready_emails: set[str] = set()
+    copy_emails: set[str] = set()
+    approved_unique: set[str] = set()
+
     for row in rows:
         f = row.get("fields") or {}
-        if not f.get("Email") or not f.get("Email Send Approved") or not str(f.get("Email Legal Basis") or "").strip():
+        email = str(f.get("Email") or "").strip().lower()
+        if not email or not f.get("Email Send Approved"):
             continue
-        if f.get("Email Do Not Contact") or f.get("Intent Do Not Contact") or f.get("Email Sent At"):
+        if f.get("Email Do Not Contact") or f.get("Intent Do Not Contact") or f.get("Email Sent At") or email in historically_sent:
             continue
+        approved_unique.add(email)
         subject = str(f.get("Outreach Subject") or "").strip()
         body = str(f.get("Outreach Draft") or "").strip()
         if str(f.get("Email Send Status") or "").upper() == "READY_TO_SEND" and subject and body:
-            ready += 1
+            ready_emails.add(email)
         elif not subject or not body:
-            approved_needing_copy += 1
+            copy_emails.add(email)
+
     print(json.dumps({
         "agent": "AGENT_0_EMAIL_CONTROLLER",
         "role": "measure_and_delegate_only",
         "target": DAILY_TARGET,
         "sent_today": sent,
         "gap": gap,
-        "ready_to_send": ready,
-        "approved_needing_copy": approved_needing_copy,
-        "delegation_required": gap > ready,
-        "delegate_to": "EMAIL_COPY_AGENT" if approved_needing_copy else "LEAD_EMAIL_PIPELINE",
-        "guardrail": "Agent 0 never writes email copy and never invents approval or legal basis."
+        "approved_unique_unsent": len(approved_unique),
+        "ready_to_send_unique": len(ready_emails),
+        "approved_needing_copy_unique": len(copy_emails),
+        "historically_sent_unique": len(historically_sent),
+        "delegation_required": gap > len(ready_emails),
+        "delegate_to": "EMAIL_SENDER_WORKER" if ready_emails else ("EMAIL_COPY_AGENT" if copy_emails else "LEAD_EMAIL_PIPELINE"),
+        "guardrail": "Email Send Approved is upstream authorization; DNC, prior-contact and technical readiness remain hard stops. Counts are unique by email."
     }, ensure_ascii=False))
 
 
