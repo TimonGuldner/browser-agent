@@ -1,19 +1,22 @@
 """Small, read-only Outscraper probe for LOCENIX lead-source validation.
 
 This intentionally does NOT write to Airtable/Supabase and does NOT perform outreach.
-It fetches a tiny Google Maps sample with contacts/social enrichment and prints a
-redacted summary so we can measure whether Outscraper can replace browser research.
+It submits a tiny Google Maps search asynchronously, polls Outscraper's request-results
+endpoint, and prints a redacted summary so we can measure whether Outscraper can
+replace browser research.
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
+import time
 from typing import Any
 
 import httpx
 
 API_URL = "https://api.outscraper.com/maps/search"
+REQUEST_URL = "https://api.outscraper.com/requests/{request_id}"
 
 
 def _walk(obj: Any):
@@ -63,7 +66,6 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
     for d in _walk(payload):
         if any(k in d for k in ("name", "place_id", "google_id", "full_address")):
             candidates.append(d)
-    # Keep likely top-level place objects, deduping by stable-ish identity.
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for d in candidates:
@@ -75,6 +77,42 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_seconds: int) -> Any:
+    deadline = time.monotonic() + max_wait_seconds
+    poll_seconds = 10
+    attempt = 0
+
+    while time.monotonic() < deadline:
+        attempt += 1
+        response = client.get(
+            REQUEST_URL.format(request_id=request_id),
+            params={"flat": "false"},
+            headers={"X-API-KEY": key},
+            timeout=30.0,
+        )
+        print(f"poll={attempt} HTTP={response.status_code}")
+
+        if response.status_code == 204:
+            print("Outscraper request finished with Failure/no results.")
+            raise RuntimeError("Outscraper request failed")
+        if response.status_code != 200:
+            print(response.text[:1000])
+            response.raise_for_status()
+
+        body = response.json()
+        status = str(body.get("status", "")).strip().lower()
+        print(json.dumps({"request_id": request_id, "status": body.get("status")}, ensure_ascii=False))
+
+        if status == "success":
+            return body
+        if status == "failure":
+            raise RuntimeError(f"Outscraper request failed: {json.dumps(body, ensure_ascii=False)[:1000]}")
+
+        time.sleep(poll_seconds)
+
+    raise TimeoutError(f"Outscraper request {request_id} did not finish within {max_wait_seconds}s")
+
+
 def main() -> int:
     key = os.getenv("OUTSCRAPER_API_KEY", "").strip()
     if not key:
@@ -83,23 +121,44 @@ def main() -> int:
 
     query = os.getenv("OUTSCRAPER_TEST_QUERY", "Physiotherapie, Köln, Deutschland")
     limit = max(1, min(int(os.getenv("OUTSCRAPER_TEST_LIMIT", "5")), 10))
+    max_wait = max(60, min(int(os.getenv("OUTSCRAPER_MAX_WAIT_SECONDS", "600")), 1200))
     params = [
         ("query", query),
         ("language", "de"),
         ("region", "DE"),
         ("limit", str(limit)),
-        ("async", "false"),
+        ("async", "true"),
         ("enrichment", "contacts_n_leads"),
     ]
-    print(json.dumps({"probe": "outscraper_maps_contacts", "query": query, "limit": limit}, ensure_ascii=False))
-    with httpx.Client(timeout=180.0) as client:
-        response = client.get(API_URL, params=params, headers={"X-API-KEY": key})
-    print(f"HTTP {response.status_code}")
-    if response.status_code != 200:
-        print(response.text[:1000])
-        return 1
 
-    payload = response.json()
+    print(json.dumps({"probe": "outscraper_maps_contacts_async", "query": query, "limit": limit}, ensure_ascii=False))
+
+    with httpx.Client() as client:
+        response = client.get(API_URL, params=params, headers={"X-API-KEY": key}, timeout=30.0)
+        print(f"submit HTTP {response.status_code}")
+
+        if response.status_code not in (200, 202):
+            print(response.text[:1000])
+            return 1
+
+        submitted = response.json()
+        status = str(submitted.get("status", "")).strip().lower()
+        request_id = str(submitted.get("id", "")).strip()
+        print(json.dumps({"request_id": request_id or None, "status": submitted.get("status")}, ensure_ascii=False))
+
+        if status == "success":
+            payload = submitted
+        else:
+            if not request_id:
+                print("Async Outscraper response did not include a request id.")
+                print(json.dumps(submitted, ensure_ascii=False)[:1000])
+                return 1
+            try:
+                payload = _wait_for_result(client, key, request_id, max_wait)
+            except Exception as exc:
+                print(f"ERROR: {type(exc).__name__}: {exc}")
+                return 1
+
     places = _extract_places(payload)[:limit]
     summary = []
     for place in places:
@@ -113,7 +172,14 @@ def main() -> int:
             "linkedin": linkedin[:5],
             "email_count": _email_count(place),
         })
-    print(json.dumps({"places_detected": len(places), "results": summary}, ensure_ascii=False, indent=2))
+
+    print(json.dumps({
+        "request_id": request_id or None,
+        "places_detected": len(places),
+        "with_linkedin": sum(1 for item in summary if item["linkedin_count"] > 0),
+        "with_email": sum(1 for item in summary if item["email_count"] > 0),
+        "results": summary,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
