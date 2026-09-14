@@ -10,6 +10,8 @@ from typing import Any
 
 from browser_use import ChatAnthropic, ChatBrowserUse, ChatGoogle, ChatOpenAI
 
+from agent import cost_control
+
 TASK_DETERMINISTIC = "deterministic"
 TASK_CHEAP_CLASSIFICATION = "cheap_classification"
 TASK_PERSONALIZATION = "personalization"
@@ -190,6 +192,14 @@ def activate_slot(slot: ProviderSlot) -> None:
 
 
 def create_browser_llm(slot: ProviderSlot, *, reasoning_effort: str = "medium", max_completion_tokens: int = 3000):
+    cost_control.authorize_and_book_estimate(
+        provider=slot.provider,
+        service=slot.model,
+        amount_eur=os.getenv("LOCENIX_BROWSER_LLM_MAX_COST_EUR", "0.12"),
+        task_type=TASK_BROWSER_REASONING,
+        model_tier="small",
+        metadata={"max_completion_tokens": max_completion_tokens},
+    )
     activate_slot(slot)
     if slot.provider == "google":
         return ChatGoogle(model=slot.model)
@@ -234,6 +244,15 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
     for slot in slots:
         started = time.monotonic()
         try:
+            cost_control.authorize_and_book_estimate(
+                provider=slot.provider,
+                service=slot.model,
+                amount_eur=os.getenv("LOCENIX_TEXT_LLM_MAX_COST_EUR", "0.03"),
+                task_type=task_type,
+                model_tier="strong" if task_type == TASK_HIGH_REASONING else "small",
+                difficult_decision=task_type in {TASK_HIGH_REASONING, TASK_REPAIR_ANALYSIS},
+                metadata={"max_output_tokens": max_output_tokens},
+            )
             if slot.provider == "google":
                 data = _http_json(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{slot.model}:generateContent?key={slot.key}",
