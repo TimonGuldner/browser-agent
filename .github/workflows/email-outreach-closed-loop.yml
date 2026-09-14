@@ -1,6 +1,10 @@
 name: LOCENIX Email Outreach Closed Loop
 
 on:
+  push:
+    paths:
+      - 'agent/email_outreach_worker.py'
+      - '.github/workflows/email-outreach-closed-loop.yml'
   schedule:
     - cron: '30 8 * * *'
     - cron: '30 11 * * *'
