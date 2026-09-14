@@ -1,9 +1,8 @@
 """Small, read-only Outscraper probe for LOCENIX lead-source validation.
 
 This intentionally does NOT write to Airtable/Supabase and does NOT perform outreach.
-It submits a tiny Google Maps search asynchronously, polls Outscraper's request-results
-endpoint, and prints a redacted summary so we can measure whether Outscraper can
-replace browser research.
+It follows Outscraper's documented Google Maps async flow with a minimal request,
+waits before polling, and prints a redacted summary.
 """
 from __future__ import annotations
 
@@ -114,7 +113,6 @@ def _payload_shape(payload: Any) -> dict[str, Any]:
 
 
 def _extract_places(payload: Any) -> list[dict[str, Any]]:
-    """Parse documented Outscraper Success shapes first, then fall back to recursive scan."""
     raw: Any = payload.get("data") if isinstance(payload, dict) else payload
     direct: list[dict[str, Any]] = []
 
@@ -153,23 +151,27 @@ def _extract_places(payload: Any) -> list[dict[str, Any]]:
 
 
 def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_seconds: int) -> Any:
-    deadline = time.monotonic() + max_wait_seconds
-    poll_seconds = 10
+    # Outscraper docs say async jobs are usually ready within 1-3 minutes and
+    # recommend waiting before checking. Poll slowly to avoid hammering the archive endpoint.
+    initial_wait = min(60, max_wait_seconds)
+    print(f"initial_wait_seconds={initial_wait}")
+    time.sleep(initial_wait)
+
+    deadline = time.monotonic() + max(0, max_wait_seconds - initial_wait)
+    poll_seconds = 60
     attempt = 0
 
-    while time.monotonic() < deadline:
+    while time.monotonic() <= deadline:
         attempt += 1
         response = client.get(
             REQUEST_URL.format(request_id=request_id),
-            params={"flat": "false"},
             headers={"X-API-KEY": key},
             timeout=30.0,
         )
         print(f"poll={attempt} HTTP={response.status_code}")
 
         if response.status_code == 204:
-            print("Outscraper request finished with Failure/no results.")
-            raise RuntimeError("Outscraper request failed")
+            raise RuntimeError("Outscraper request archive returned 204 (Failure/no results)")
         if response.status_code != 200:
             print(response.text[:1000])
             response.raise_for_status()
@@ -184,6 +186,8 @@ def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_s
         if status == "failure":
             raise RuntimeError(f"Outscraper request failed: {json.dumps(body, ensure_ascii=False)[:1000]}")
 
+        if time.monotonic() + poll_seconds > deadline:
+            break
         time.sleep(poll_seconds)
 
     raise TimeoutError(f"Outscraper request {request_id} did not finish within {max_wait_seconds}s")
@@ -195,18 +199,19 @@ def main() -> int:
         print("OUTSCRAPER_API_KEY is not configured.")
         return 2
 
-    query = os.getenv("OUTSCRAPER_TEST_QUERY", "Physiotherapie, Köln, Deutschland")
-    limit = max(1, min(int(os.getenv("OUTSCRAPER_TEST_LIMIT", "5")), 10))
-    max_wait = max(60, min(int(os.getenv("OUTSCRAPER_MAX_WAIT_SECONDS", "600")), 1200))
+    query = os.getenv("OUTSCRAPER_TEST_QUERY", "restaurants, Cologne, Germany")
+    limit = max(1, min(int(os.getenv("OUTSCRAPER_TEST_LIMIT", "3")), 10))
+    max_wait = max(120, min(int(os.getenv("OUTSCRAPER_MAX_WAIT_SECONDS", "600")), 1200))
+
+    # Minimal documented request: query + required limit + async.
+    # No language/region/enrichment/flat until the base Maps call is proven stable.
     params = [
         ("query", query),
-        ("language", "de"),
-        ("region", "DE"),
         ("limit", str(limit)),
         ("async", "true"),
     ]
 
-    print(json.dumps({"probe": "outscraper_maps_only_async", "query": query, "limit": limit}, ensure_ascii=False))
+    print(json.dumps({"probe": "outscraper_maps_minimal_async", "query": query, "limit": limit}, ensure_ascii=False))
 
     request_id = ""
     with httpx.Client() as client:
@@ -220,7 +225,11 @@ def main() -> int:
         submitted = response.json()
         status = str(submitted.get("status", "")).strip().lower()
         request_id = str(submitted.get("id", "")).strip()
-        print(json.dumps({"request_id": request_id or None, "status": submitted.get("status")}, ensure_ascii=False))
+        print(json.dumps({
+            "request_id": request_id or None,
+            "status": submitted.get("status"),
+            "response_keys": sorted(str(k) for k in submitted.keys())[:30],
+        }, ensure_ascii=False))
 
         if status == "success":
             payload = submitted
@@ -263,7 +272,7 @@ def main() -> int:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     if not places:
-        print("ERROR: Outscraper returned Success but no Google Maps places were parsed. See success_payload_shape above.")
+        print("ERROR: Outscraper returned Success but the documented data array contained no places.")
         return 3
     return 0
 
