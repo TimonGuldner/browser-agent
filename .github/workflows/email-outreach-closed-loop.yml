@@ -11,17 +11,31 @@ on:
 jobs:
   send-approved-outreach:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
+      AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+      AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GOOGLE_API_KEY_2: ${{ secrets.GOOGLE_API_KEY_2 }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      EMAIL_DAILY_LIMIT: '20'
+      EMAIL_FROM: 'Timon Guldner <hello@locenix.com>'
+      EMAIL_REPLY_TO: 'hello@locenix.com'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Agent 0 prepare approved quota gap
+        run: python -u -m agent.email_quota_enforcer
       - name: Send approved unique outreach emails
-        env:
-          AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
-          AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
-          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          EMAIL_DAILY_LIMIT: '20'
-        run: python -m agent.email_outreach_worker
+        run: python -u -m agent.email_outreach_worker
