@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 
 from agent import llm_router
+from agent.compliance_gate import email_gate
 
 BASE_ID = os.getenv("AIRTABLE_SALES_BASE_ID", "appuPKnVyLsbWbxMR")
 TABLE_ID = os.getenv("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQwsT")
@@ -27,7 +28,9 @@ def request(url, method="GET", data=None):
 
 
 def candidates():
-    formula = "AND({Email Send Approved}=1,{Email Legal Basis}!='',{Email}!='',{Email Sent At}='',OR({Outreach Subject}='',{Outreach Draft}=''))"
+    # Approval is upstream source-of-truth. Copy generation must not require or invent
+    # a second authorization field.
+    formula = "AND({Email Send Approved}=1,{Email}!='',{Email Sent At}='',OR({Outreach Subject}='',{Outreach Draft}=''))"
     params = urllib.parse.urlencode({"pageSize": min(100, LIMIT), "filterByFormula": formula})
     return request(f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}?{params}").get("records", [])
 
@@ -45,22 +48,28 @@ def draft(fields):
 
 def main():
     if not llm_router.configured_slots(llm_router.TASK_PERSONALIZATION):
-        print(json.dumps({"agent":"EMAIL_COPY_AGENT","status":"blocked_no_llm"}))
+        print(json.dumps({"agent": "EMAIL_COPY_AGENT", "status": "blocked_no_llm"}))
         return
-    prepared, errors = 0, []
+    prepared, errors, blocked = 0, [], []
     for row in candidates()[:LIMIT]:
         f = row.get("fields") or {}
-        if f.get("Email Do Not Contact") or f.get("Intent Do Not Contact"):
+        gate = email_gate(f, require_copy=False)
+        if not gate.allowed:
+            blocked.append({"record": row.get("id"), "reason": gate.reason_code})
             continue
         try:
             subject, body = draft(f)
             if not subject or not body:
                 raise RuntimeError("empty copy")
-            request(f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}/{row['id']}", "PATCH", {"fields": {"Outreach Subject": subject, "Outreach Draft": body, "Email Send Status": "READY_TO_SEND", "Email Send Error": ""}})
+            request(
+                f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_ID}/{row['id']}",
+                "PATCH",
+                {"fields": {"Outreach Subject": subject, "Outreach Draft": body, "Email Send Status": "READY_TO_SEND", "Email Send Error": ""}},
+            )
             prepared += 1
         except Exception as exc:
             errors.append({"record": row.get("id"), "error": str(exc)[:300]})
-    print(json.dumps({"agent":"EMAIL_COPY_AGENT","status":"complete","prepared":prepared,"errors":errors}, ensure_ascii=False))
+    print(json.dumps({"agent": "EMAIL_COPY_AGENT", "status": "complete", "prepared": prepared, "blocked": blocked, "errors": errors}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
