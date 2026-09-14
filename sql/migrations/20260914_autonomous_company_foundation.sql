@@ -235,7 +235,7 @@ revoke all on function public.claim_agent_job(text) from public, anon, authentic
 
 create or replace view public.company_budget_status
 with (security_invoker=true) as
-with window as (
+with month_window as (
   select
     date_trunc('month', now() at time zone 'Europe/Berlin') at time zone 'Europe/Berlin' as starts_at,
     (date_trunc('month', now() at time zone 'Europe/Berlin') + interval '1 month') at time zone 'Europe/Berlin' as ends_at
@@ -243,7 +243,7 @@ with window as (
   select
     coalesce(sum(amount_usd) filter (where category='llm'),0) as llm_ledger,
     coalesce(sum(amount_usd) filter (where category<>'llm'),0) as non_llm
-  from public.company_cost_events, window
+  from public.company_cost_events, month_window
   where occurred_at >= starts_at and occurred_at < ends_at
 ), totals as (
   select greatest(public.agent_monthly_llm_cost(now()),llm_ledger)+non_llm as spent_usd
