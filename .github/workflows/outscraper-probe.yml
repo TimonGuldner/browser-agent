@@ -2,6 +2,11 @@ name: LOCENIX Outscraper Probe
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - agent/outscraper_probe.py
+      - .github/workflows/outscraper-probe.yml
 
 permissions:
   contents: read
@@ -9,11 +14,12 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       OUTSCRAPER_API_KEY: ${{ secrets.OUTSCRAPER_API_KEY }}
       OUTSCRAPER_TEST_QUERY: "Physiotherapie, Köln, Deutschland"
       OUTSCRAPER_TEST_LIMIT: "5"
+      OUTSCRAPER_MAX_WAIT_SECONDS: "600"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
