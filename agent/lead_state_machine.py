@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+ALLOWED = {
+ "DISCOVERED":{"ENRICHED","INVALID","BLOCKED","DO_NOT_CONTACT"},
+ "ENRICHED":{"QUALIFIED","INVALID","BLOCKED","DO_NOT_CONTACT"},
+ "QUALIFIED":{"OUTREACH_READY","BLOCKED","DO_NOT_CONTACT"},
+ "OUTREACH_READY":{"CONTACTED","BLOCKED","DO_NOT_CONTACT"},
+ "CONTACTED":{"REPLIED","NOT_INTERESTED","DO_NOT_CONTACT","BLOCKED"},
+ "REPLIED":{"INTERESTED","NOT_INTERESTED","DO_NOT_CONTACT","BLOCKED"},
+ "INTERESTED":{"CHECK_OFFERED","CHECK_REQUESTED","TRIAL","NOT_INTERESTED","DO_NOT_CONTACT"},
+ "CHECK_OFFERED":{"CHECK_REQUESTED","NOT_INTERESTED","DO_NOT_CONTACT"},
+ "CHECK_REQUESTED":{"CHECK_COMPLETED","TRIAL","NOT_INTERESTED","DO_NOT_CONTACT"},
+ "CHECK_COMPLETED":{"TRIAL","NOT_INTERESTED","DO_NOT_CONTACT"},
+ "TRIAL":{"PAID","NOT_INTERESTED","DO_NOT_CONTACT"},
+ "BLOCKED":{"DISCOVERED","ENRICHED","QUALIFIED","OUTREACH_READY","CONTACTED","REPLIED","INTERESTED","DO_NOT_CONTACT"},
+}
+TERMINAL={"PAID","NOT_INTERESTED","DO_NOT_CONTACT","INVALID"}
+
+def can_transition(current:str,new:str)->bool:
+    current,new=(current or "DISCOVERED").upper(),new.upper()
+    return current!=new and current not in TERMINAL and new in ALLOWED.get(current,set())
+
+def transition(current:str,new:str)->str:
+    if not can_transition(current,new): raise ValueError(f"invalid lead transition {current}->{new}")
+    return new.upper()
