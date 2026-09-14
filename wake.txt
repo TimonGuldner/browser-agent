@@ -1,7 +1,5 @@
-LOCENIX browser agent wake file.
-Updating this file triggers the GitHub Actions runner.
-Agent 0 CEO closed-loop supervisor is enabled.
-System-wide priority invariant: larger priority number executes first.
-Central LLM router is enabled with Gemini-first task routing, multi-key provider pools and safe failover.
-Deterministic lead research remains zero-LLM.
-Wake: 2026-09-14 15:50 Europe/Berlin — enforce today's email quota now: prepare only already-approved/legal-basis leads, send eligible unique outreach, re-measure all daily KPIs, and continue corrective closed-loop work.
+LOCENIX hierarchical closed-loop wake.
+Agent 0 CEO -> Sales Head / Growth Head / Ops Head.
+Revenue opportunities outrank cold activity; compliance remains fail-closed.
+Deterministic workers handle side effects; LLM only where language/interpretation is needed.
+Wake: 2026-09-14 — run full MEASURE -> DELEGATE -> EXECUTE -> VERIFY -> ESCALATE cycle after architecture refactor.
