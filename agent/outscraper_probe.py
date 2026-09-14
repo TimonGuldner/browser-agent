@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -49,6 +50,23 @@ def _linkedin_values(obj: Any) -> list[str]:
     return found
 
 
+def _linkedin_types(values: list[str]) -> list[str]:
+    types: list[str] = []
+    for value in values:
+        lowered = value.lower()
+        if "/in/" in lowered:
+            kind = "personal_profile"
+        elif "/company/" in lowered:
+            kind = "company_page"
+        elif "linkedin.com" in lowered:
+            kind = "other_linkedin"
+        else:
+            continue
+        if kind not in types:
+            types.append(kind)
+    return types
+
+
 def _email_count(obj: Any) -> int:
     values: set[str] = set()
     for d in _walk(obj):
@@ -61,19 +79,78 @@ def _email_count(obj: Any) -> int:
     return len(values)
 
 
+def _website_host(place: dict[str, Any]) -> str | None:
+    raw = str(_first(place, "site", "website") or "").strip()
+    if not raw:
+        return None
+    try:
+        return urlparse(raw).netloc.lower() or None
+    except Exception:
+        return None
+
+
+def _payload_shape(payload: Any) -> dict[str, Any]:
+    """Return only structural diagnostics; never dump emails or profile URLs."""
+    shape: dict[str, Any] = {"payload_type": type(payload).__name__}
+    if isinstance(payload, dict):
+        shape["top_level_keys"] = sorted(str(k) for k in payload.keys())[:30]
+        data = payload.get("data")
+        shape["data_type"] = type(data).__name__
+        if isinstance(data, list):
+            shape["data_len"] = len(data)
+            if data:
+                shape["data_first_type"] = type(data[0]).__name__
+                if isinstance(data[0], list):
+                    shape["data_first_len"] = len(data[0])
+                    if data[0] and isinstance(data[0][0], dict):
+                        shape["first_place_keys"] = sorted(str(k) for k in data[0][0].keys())[:40]
+                elif isinstance(data[0], dict):
+                    shape["first_place_keys"] = sorted(str(k) for k in data[0].keys())[:40]
+        elif isinstance(data, dict):
+            shape["data_keys"] = sorted(str(k) for k in data.keys())[:30]
+        elif isinstance(data, str):
+            shape["data_is_url"] = data.startswith(("http://", "https://"))
+    return shape
+
+
 def _extract_places(payload: Any) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    for d in _walk(payload):
-        if any(k in d for k in ("name", "place_id", "google_id", "full_address")):
-            candidates.append(d)
+    """Parse documented Outscraper Success shapes first, then fall back to recursive scan."""
+    raw: Any = payload.get("data") if isinstance(payload, dict) else payload
+    direct: list[dict[str, Any]] = []
+
+    if isinstance(raw, list):
+        # With flat=true the documented shape is data=[{place}, ...].
+        if all(isinstance(item, dict) for item in raw):
+            direct = [item for item in raw if isinstance(item, dict)]
+        else:
+            # With flat=false the documented shape is data=[[{place}, ...], ...].
+            for group in raw:
+                if isinstance(group, list):
+                    direct.extend(item for item in group if isinstance(item, dict))
+                elif isinstance(group, dict):
+                    direct.append(group)
+    elif isinstance(raw, dict):
+        for key in ("results", "places", "items", "data"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                direct.extend(item for item in value if isinstance(item, dict))
+
+    candidates = direct
+    if not candidates:
+        candidates = [
+            d for d in _walk(payload)
+            if any(k in d for k in ("name", "title", "place_id", "google_id", "full_address"))
+        ]
+
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for d in candidates:
-        name = str(_first(d, "name", "title") or "")
-        identity = str(_first(d, "place_id", "google_id", "cid", "location_link") or name)
-        if name and identity not in seen:
-            seen.add(identity)
-            out.append(d)
+        name = str(_first(d, "name", "title") or "").strip()
+        identity = str(_first(d, "place_id", "google_id", "cid", "location_link") or name).strip()
+        if not name or not identity or identity in seen:
+            continue
+        seen.add(identity)
+        out.append(d)
     return out
 
 
@@ -86,7 +163,7 @@ def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_s
         attempt += 1
         response = client.get(
             REQUEST_URL.format(request_id=request_id),
-            params={"flat": "false"},
+            params={"flat": "true"},
             headers={"X-API-KEY": key},
             timeout=30.0,
         )
@@ -104,6 +181,7 @@ def _wait_for_result(client: httpx.Client, key: str, request_id: str, max_wait_s
         print(json.dumps({"request_id": request_id, "status": body.get("status")}, ensure_ascii=False))
 
         if status == "success":
+            print(json.dumps({"success_payload_shape": _payload_shape(body)}, ensure_ascii=False))
             return body
         if status == "failure":
             raise RuntimeError(f"Outscraper request failed: {json.dumps(body, ensure_ascii=False)[:1000]}")
@@ -128,11 +206,13 @@ def main() -> int:
         ("region", "DE"),
         ("limit", str(limit)),
         ("async", "true"),
+        ("dropDuplicates", "true"),
         ("enrichment", "contacts_n_leads"),
     ]
 
     print(json.dumps({"probe": "outscraper_maps_contacts_async", "query": query, "limit": limit}, ensure_ascii=False))
 
+    request_id = ""
     with httpx.Client() as client:
         response = client.get(API_URL, params=params, headers={"X-API-KEY": key}, timeout=30.0)
         print(f"submit HTTP {response.status_code}")
@@ -148,6 +228,7 @@ def main() -> int:
 
         if status == "success":
             payload = submitted
+            print(json.dumps({"success_payload_shape": _payload_shape(payload)}, ensure_ascii=False))
         else:
             if not request_id:
                 print("Async Outscraper response did not include a request id.")
@@ -165,21 +246,29 @@ def main() -> int:
         linkedin = _linkedin_values(place)
         summary.append({
             "name": _first(place, "name", "title"),
-            "website": _first(place, "site", "website"),
+            "website_host": _website_host(place),
             "rating": _first(place, "rating"),
             "reviews": _first(place, "reviews", "reviews_count", "reviews_number"),
             "linkedin_count": len(linkedin),
-            "linkedin": linkedin[:5],
+            "linkedin_types": _linkedin_types(linkedin),
             "email_count": _email_count(place),
         })
 
-    print(json.dumps({
+    result = {
         "request_id": request_id or None,
         "places_detected": len(places),
+        "with_website": sum(1 for item in summary if item["website_host"]),
         "with_linkedin": sum(1 for item in summary if item["linkedin_count"] > 0),
+        "with_personal_linkedin": sum(1 for item in summary if "personal_profile" in item["linkedin_types"]),
+        "with_company_linkedin": sum(1 for item in summary if "company_page" in item["linkedin_types"]),
         "with_email": sum(1 for item in summary if item["email_count"] > 0),
         "results": summary,
-    }, ensure_ascii=False, indent=2))
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    if not places:
+        print("ERROR: Outscraper returned Success but no Google Maps places were parsed. See success_payload_shape above.")
+        return 3
     return 0
 
 
