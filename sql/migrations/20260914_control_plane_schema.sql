@@ -79,7 +79,9 @@ on conflict(agent_id) do update set department=excluded.department,role_key=excl
 capabilities=excluded.capabilities,model_tier=excluded.model_tier,updated_at=now();
 
 insert into public.company_agents(agent_id,department,role_key,worker_type,capabilities,model_tier)
-select t.role_key,case when t.role_key='AGENT_0_CEO' then 'CEO' when t.role_key in('SALES_HEAD','GROWTH_HEAD') then 'CMO'
+select t.role_key,case when lower(t.role_key)='inbox' then 'CONVERSION' when lower(t.role_key)='lead' then 'OPPORTUNITY'
+when lower(t.role_key) in('growth','content') then 'DISTRIBUTION'
+when t.role_key='AGENT_0_CEO' then 'CEO' when t.role_key in('SALES_HEAD','GROWTH_HEAD') then 'CMO'
 when t.role_key in('OPS_HEAD','QUEUE_MANAGER','SCHEDULER','REPAIR_AGENT') then 'CTO'
 when t.role_key in('MAPS_OUTSCRAPER_WORKER','CONTACT_ENRICHMENT_WORKER','QUALIFICATION_WORKER') then 'OPPORTUNITY'
 when t.role_key in('CHANNEL_TRAFFIC_AGENT','LINKEDIN_RESEARCH_WORKER','ENGAGEMENT_WORKER') then 'DISTRIBUTION'

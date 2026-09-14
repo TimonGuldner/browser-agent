@@ -391,17 +391,18 @@ begin
  for s in select sch.* from public.agent_schedules sch where sch.enabled loop
   select * into t from public.agent_templates x where x.role_key=s.role_key and x.enabled;
   if not found then continue;end if;
-  select department into dept from public.company_agents where agent_id=t.role_key;
+  dept:=case lower(t.role_key)when'inbox'then'CONVERSION'when'lead'then'OPPORTUNITY'
+   when'growth'then'DISTRIBUTION'when'content'then'DISTRIBUTION'else coalesce((select department from public.company_agents where agent_id=t.role_key),'CTO')end;
   for slot in select gs from generate_series(first_slot,p_now,interval'15 minutes')gs where gs>=s.active_from loop
    lt:=slot at time zone s.timezone;
    if extract(minute from lt)::int<>s.run_minute then continue;end if;
    if s.run_hours is not null and not(extract(hour from lt)::smallint=any(s.run_hours))then continue;end if;
    if s.weekdays is not null and not(extract(isodow from lt)::smallint=any(s.weekdays))then continue;end if;
    jid:=null;
-   insert into public.agent_jobs(task,mode,priority,max_steps,input,schedule_id,schedule_slot,run_id,department,task_type,correlation_id,idempotency_key,assigned_agent_id)
+   insert into public.agent_jobs(task,mode,priority,max_steps,input,schedule_id,schedule_slot,run_id,department,task_type,correlation_id,idempotency_key)
    values(concat_ws(E'\n\n',nullif(t.runtime_adapter,''),'--- MASTER PROMPT ---',t.prompt),t.default_mode,t.priority,t.max_steps,
    jsonb_build_object('requires_airtable',t.requires_airtable,'agent_role',t.role_key,'scheduled',true,'schedule_slot',slot,'timezone',s.timezone,'source','supabase-scheduler'),
-   s.id,slot,rid,dept,'scheduled_agent',coalesce(rid::text,'legacy'),'schedule:'||s.id||':'||slot,t.role_key)
+   s.id,slot,rid,dept,'scheduled_agent',coalesce(rid::text,'legacy'),'schedule:'||s.id||':'||slot)
    on conflict do nothing returning id into jid;
    if jid is not null then
     perform public.company_record_event(rid,'SCHEDULER','CTO',jid,'scheduler.enqueued','queued','Scheduled task enqueued',0,jsonb_build_object('role_key',t.role_key,'slot',slot));
