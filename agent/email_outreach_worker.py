@@ -6,9 +6,10 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+from agent.compliance_gate import email_gate
+
 AIRTABLE_BASE_ID = os.environ["AIRTABLE_SALES_BASE_ID"]
 AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_SALES_TABLE_ID", "tblF4ghkYFzkeQws5T")
-# Backward-compatible correction for the actual production table ID.
 if AIRTABLE_TABLE_ID == "tblF4ghkYFzkeQws5T":
     AIRTABLE_TABLE_ID = "tblF4ghkYFzkeQwsT"
 AIRTABLE_TOKEN = os.environ["AIRTABLE_TOKEN"]
@@ -40,52 +41,32 @@ def patch_record(record_id, fields):
 
 
 def send_resend(to, subject, text):
-    payload = {
-        "from": EMAIL_FROM,
-        "to": [to],
-        "reply_to": [EMAIL_REPLY_TO],
-        "subject": subject,
-        "text": text,
-    }
-    req = urllib.request.Request(
-        "https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers=resend_headers(),
-    )
+    payload = {"from": EMAIL_FROM, "to": [to], "reply_to": [EMAIL_REPLY_TO], "subject": subject, "text": text}
+    req = urllib.request.Request("https://api.resend.com/emails", data=json.dumps(payload).encode(), method="POST", headers=resend_headers())
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode())
 
 
 def list_candidates():
-    formula = "AND({Email Send Approved}=1,{Email Send Status}='READY_TO_SEND',{Email Legal Basis}!='',{Email}!='',{Outreach Subject}!='',{Outreach Draft}!='')"
+    # Email Send Approved is the explicit upstream business authorization.
+    formula = "AND({Email Send Approved}=1,{Email Send Status}='READY_TO_SEND',{Email}!='',{Outreach Subject}!='',{Outreach Draft}!='')"
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
     return get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
 
 
 def all_sent_emails() -> set[str]:
-    # Any previous provider submission is kept out of automatic retries, including bounces.
-    # A bounced/failed address must be investigated rather than automatically resent.
     formula = "{Email Sent At}!=''"
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
     rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
-    return {
-        str((r.get("fields") or {}).get("Email") or "").strip().lower()
-        for r in rows if (r.get("fields") or {}).get("Email")
-    }
+    return {str((r.get("fields") or {}).get("Email") or "").strip().lower() for r in rows if (r.get("fields") or {}).get("Email")}
 
 
 def sent_today_count() -> int:
-    # Daily quota counts only technically confirmed records that are still SENT.
-    # FAILED/bounced records may retain Sent At for audit but must not satisfy the KPI.
     today = datetime.now(timezone.utc).date().isoformat()
-    formula = (
-        f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'),"
-        "{Email Send Status}='SENT',{Email Message ID}!='')"
-    )
+    formula = f"AND({{Email Sent At}}!='',IS_SAME({{Email Sent At}},'{today}','day'),{{Email Send Status}}='SENT',{{Email Message ID}}!='')"
     params = urllib.parse.urlencode({"pageSize": 100, "filterByFormula": formula})
     rows = get_json(f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_ID}?{params}", airtable_headers()).get("records", [])
-    return len({
-        str((r.get("fields") or {}).get("Email") or "").strip().lower()
-        for r in rows if (r.get("fields") or {}).get("Email")
-    })
+    return len({str((r.get("fields") or {}).get("Email") or "").strip().lower() for r in rows if (r.get("fields") or {}).get("Email")})
 
 
 def main():
@@ -96,32 +77,27 @@ def main():
         return
 
     historically_sent = all_sent_emails()
-    seen = set()
-    sent = []
-    errors = []
-
+    seen, sent, errors, blocked = set(), [], [], []
     for rec in list_candidates():
         if len(sent) >= remaining:
             break
         f = rec.get("fields") or {}
+        gate = email_gate(f)
+        if not gate.allowed:
+            blocked.append({"record": rec.get("id"), "reason": gate.reason_code})
+            continue
         email = str(f.get("Email") or "").strip().lower()
         company = str(f.get("Company") or "").strip().lower()
         key = email or company
         if not key or key in seen or email in historically_sent:
             continue
         seen.add(key)
-
         try:
             out = send_resend(email, str(f["Outreach Subject"]), str(f["Outreach Draft"]))
             message_id = str(out.get("id") or "")
             if not message_id:
                 raise RuntimeError(f"No Resend id returned: {out}")
-            patch_record(rec["id"], {
-                "Email Send Status": "SENT",
-                "Email Message ID": message_id,
-                "Email Sent At": datetime.now(timezone.utc).isoformat(),
-                "Email Send Error": "",
-            })
+            patch_record(rec["id"], {"Email Send Status": "SENT", "Email Message ID": message_id, "Email Sent At": datetime.now(timezone.utc).isoformat(), "Email Send Error": ""})
             historically_sent.add(email)
             sent.append({"record": rec["id"], "email": email, "message_id": message_id})
         except Exception as exc:
@@ -131,7 +107,7 @@ def main():
                 pass
             errors.append({"record": rec.get("id"), "error": str(exc)})
 
-    print(json.dumps({"status": "completed", "sent_before": sent_today, "sent_now": len(sent), "sent": sent, "errors": errors}, ensure_ascii=False))
+    print(json.dumps({"status": "completed", "sent_before": sent_today, "sent_now": len(sent), "sent": sent, "blocked": blocked, "errors": errors}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
