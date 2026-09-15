@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime,timedelta,timezone
-from agent.growth_execution import audit_opportunity,permitted_route,funnel,experiment_decision,channel_rank,fetch_owned
+from agent.growth_execution import GrowthExecutor,audit_opportunity,permitted_route,funnel,experiment_decision,channel_rank,fetch_owned
 class GrowthPolicyTests(unittest.TestCase):
  def test_owned_bofu_opportunity(self):
   op=audit_opportunity('https://locenix.com/blog/google-maps-ranking-verbessern','<title>Maps</title><h1>Maps</h1>')
@@ -33,4 +33,15 @@ class GrowthPolicyTests(unittest.TestCase):
  def test_ssrf_blocked(self):
   for url in ['http://locenix.com','https://127.0.0.1','https://locenix.com.evil.test','https://user@locenix.com']:
    with self.assertRaises(ValueError):fetch_owned(url)
+ def test_controlled_worker_failure_happens_only_on_first_attempt(self):
+  executor=GrowthExecutor(None)
+  job={'attempt':0,'input':{'is_test':True,'failure_injection':'worker_failure_once'}}
+  with self.assertRaisesRegex(RuntimeError,'INJECTED_WORKER_FAILURE'):executor.resilience_verify(job)
+  job['attempt']=1
+  executor.distribute=lambda current:{'evidence':'verified'}
+  self.assertTrue(executor.resilience_verify(job)['recovery_verified'])
+ def test_resilience_injection_requires_test_flag(self):
+  executor=GrowthExecutor(None)
+  with self.assertRaisesRegex(ValueError,'CONTROLLED_TEST_FLAG_REQUIRED'):
+   executor.resilience_verify({'attempt':0,'input':{'failure_injection':'worker_failure_once'}})
 if __name__=='__main__':unittest.main()

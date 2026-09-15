@@ -19,7 +19,7 @@ AGENT = 'GROWTH_EXECUTOR'
 METRICS = ('revenue','customers','trials','visibility_checks','qualified_traffic','clicks','impressions')
 DEPARTMENTS = {'growth_discover':'OPPORTUNITY','growth_seo':'SEO', 'growth_distribute':'DISTRIBUTION',
               'growth_outreach':'OUTREACH','growth_analyze':'ANALYTICS','growth_convert':'CONVERSION',
-              'growth_review':'CEO','growth_route_review':'OUTREACH'}
+              'growth_review':'CEO','growth_route_review':'OUTREACH','growth_resilience_verify':'DISTRIBUTION'}
 OWNED_HOSTS = {'locenix.com','www.locenix.com'}
 
 
@@ -182,6 +182,14 @@ class GrowthExecutor:
         return {'url':url,'target':target,'external_action':'owned_contextual_distribution',
                 'evidence':'Live HTML contains exact attributed CTA and destination returns HTTP 200',
                 'business_outcome':'pending_observation','synthetic_probe':True}
+    def resilience_verify(self,job):
+        data=job['input']
+        if data.get('is_test') is not True:raise ValueError('CONTROLLED_TEST_FLAG_REQUIRED')
+        if data.get('failure_injection')=='worker_failure_once' and int(job.get('attempt') or 0)==0:
+            raise RuntimeError('INJECTED_WORKER_FAILURE')
+        result=self.distribute(job)
+        return {**result,'recovery_verified':True,
+                'evidence':result['evidence']+'; controlled first-attempt worker failure recovered'}
     def analyze(self,job):
         from agent.growth_analytics import import_product,product_client
         self.cp.rpc('company_growth_request_sync',{})
@@ -255,12 +263,15 @@ class GrowthExecutor:
         self.cp.heartbeat(AGENT,'busy',job['id'])
         handler={'growth_discover':self.discover,'growth_seo':self.seo,'growth_distribute':self.distribute,
           'growth_analyze':self.analyze,'growth_convert':self.convert,'growth_outreach':self.outreach,'growth_review':self.review,'growth_route_review':self.route_review}.get(job['task_type'])
+        if job['task_type']=='growth_resilience_verify':handler=self.resilience_verify
         if handler is None:raise ValueError('UNKNOWN_GROWTH_TASK')
         try:
             result=handler(job)
             if not result.get('cost_logged'):
                 self.cp.rpc('company_growth_zero_cost',{'p_task_id':job['id'],'p_service':job['task_type']})
-            self.cp.complete_task(job['id'],AGENT,result,{'passed':True,'evidence':result.get('evidence','Persisted CEO review decision')})
+            verification={'passed':True,'evidence':result.get('evidence','Persisted CEO review decision')}
+            self.cp.complete_task(job['id'],AGENT,result,verification)
+            self.cp.rpc('company_recovery_confirm',{'p_task_id':job['id'],'p_verification':verification})
             self.cp.receive_result(job['id'])
             return result
         except Exception as e:
@@ -280,7 +291,12 @@ class GrowthExecutor:
             rows=self.cp.rpc('claim_agent_job',{'p_worker':AGENT})
             if not rows:break
             try:results.append(self.execute(rows[0]))
-            except Exception as e:results.append({'failed':str(e)})
+            except Exception as e:results.append({'failed':str(e),'task_id':rows[0]['id']})
+        for item in results:
+            if not item.get('failed') or not item.get('task_id'):continue
+            state=self.cp.get('agent_jobs',f"id=eq.{item['task_id']}&select=status,verification_status")
+            if state and state[0].get('status')=='completed' and state[0].get('verification_status')=='passed':
+                item['recovered']=True;item.pop('failed',None)
         return results
 
 

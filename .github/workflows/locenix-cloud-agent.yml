@@ -69,6 +69,15 @@ jobs:
           pip install -e .
           python -m compileall -q agent
           python -m agent.llm_router_selftest
+      - name: CONTROL PLANE — heartbeats
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          for AGENT_ID in CEO SCHEDULER WATCHDOG; do
+            curl --fail --silent --show-error -X POST "$SUPABASE_URL/rest/v1/rpc/company_heartbeat" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"p_agent_id\":\"$AGENT_ID\",\"p_status\":\"active\",\"p_metadata\":{\"source\":\"github_actions_closed_loop\"}}" >/dev/null
+          done
       - name: MEASURE — Agent 0 CEO
         if: steps.config.outputs.ready == 'true'
         continue-on-error: true
