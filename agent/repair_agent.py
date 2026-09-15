@@ -110,6 +110,25 @@ def transition(db: Client, incident_id: str, status: str, level: str, reason: st
     }).execute()
 
 
+def incident_is_at(db: Client, incident_id: str, status: str, level: str) -> bool:
+    """Keep terminal organizational escalations idempotent across affected jobs.
+
+    Multiple failed jobs can deliberately share one primary incident.  Each job
+    still gets linked by ``company_incident_open``; it must not emit the same
+    CFO/owner escalation again for every affected task.
+    """
+    row = (
+        db.table("company_incidents")
+        .select("status,escalation_level")
+        .eq("id", incident_id)
+        .single()
+        .execute()
+        .data
+        or {}
+    )
+    return row.get("status") == status and row.get("escalation_level") == level
+
+
 def reconcile_repair_tests(db: Client) -> list[dict[str, str]]:
     """A passing child test enables a bounded retry of the original task."""
     rows = db.table("agent_jobs").select("id,input,result,verification_status").eq("status", "completed").order("updated_at", desc=True).limit(100).execute().data or []
@@ -290,10 +309,12 @@ def run() -> dict[str, Any]:
         job_id = str(job["id"])
         incident_id, recovery = ensure_incident(db, job)
         if recovery.human_gate:
-            transition(db, incident_id, "human_gate", "L5", "A genuine credential or platform verification gate requires an authorized person")
+            if not incident_is_at(db, incident_id, "human_gate", "L5"):
+                transition(db, incident_id, "human_gate", "L5", "A genuine credential or platform verification gate requires an authorized person")
             continue
         if is_hard_block(job):
-            transition(db, incident_id, "escalated", "L1", "Deterministic guard stopped unsafe or over-budget repair", {"prevention_rule": recovery.action})
+            if not incident_is_at(db, incident_id, "escalated", "L1"):
+                transition(db, incident_id, "escalated", "L1", "Deterministic guard stopped unsafe or over-budget repair", {"prevention_rule": recovery.action})
             continue
         if not needs_llm_repair(job) or has_repair_activity(db, job_id):
             continue
