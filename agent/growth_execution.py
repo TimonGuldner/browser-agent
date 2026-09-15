@@ -215,8 +215,13 @@ class GrowthExecutor:
     def outreach(self,job):
         # Reuse existing sender and CRM, but never equate a researched email with consent.
         from agent import email_outreach_worker as sender
-        sent=[];blocked=[]
+        sent=[];blocked=[];cost_logged=False
         candidates=sender.list_candidates();history=sender.all_sent_emails()
+        if job['input'].get('qualify_only'):
+            reviews=[{'record_id':r['id'],'permitted_route':permitted_route(r.get('fields',{}))[0],
+                      'reason':permitted_route(r.get('fields',{}))[1]} for r in candidates]
+            return {'candidate_count':len(candidates),'route_reviews':reviews,'sent':[],
+                    'evidence':'Real existing Airtable candidate list evaluated; qualification-only acceptance; no send attempted'}
         remaining=max(0,min(1,sender.DAILY_LIMIT-sender.sent_today_count()))
         for rec in candidates:
             if len(sent)>=remaining:break
@@ -227,12 +232,23 @@ class GrowthExecutor:
             email=f['Email'].strip().lower()
             if email in history:continue
             # Existing sender, now with provider idempotency to survive CRM write failures.
-            receipt=sender.send_resend(email,f['Outreach Subject'],f['Outreach Draft'],idempotency_key='growth-'+rec['id'])
+            cap=os.environ.get('EMAIL_MAX_COST_EUR','0.01')
+            reservation=self.cp.rpc('company_authorize_spend',{'p_amount_eur':cap,'p_category':'api',
+                'p_provider':'resend','p_service':'outreach_email','p_reason':'Conservative per-send upper bound',
+                'p_run_id':job['run_id'],'p_job_id':job['id'],'p_agent_id':AGENT,'p_department':'OUTREACH',
+                'p_model_tier':'deterministic','p_metadata':{'upper_bound_booking':True}})
+            if not reservation.get('allowed'):raise RuntimeError('CFO_BUDGET_BLOCKED: '+reservation.get('reason','unknown'))
+            try:
+                receipt=sender.send_resend(email,f['Outreach Subject'],f['Outreach Draft'],idempotency_key='growth-'+rec['id'])
+            finally:
+                self.cp.rpc('company_record_cost',{'p_reservation_id':reservation['reservation_id'],'p_amount_eur':cap,
+                    'p_dedupe_key':'outreach-attempt:'+job['id']+':'+rec['id'], 'p_units':{'upper_bound_booking':True}})
+                cost_logged=True
             if not receipt.get('id'):raise RuntimeError('NO_PROVIDER_RECEIPT')
             sender.patch_record(rec['id'],{'Email Send Status':'SENT','Email Message ID':receipt['id'],
                 'Email Sent At':datetime.now(timezone.utc).isoformat(),'Email Send Error':''})
             sent.append({'record_id':rec['id'],'message_id':receipt['id']});history.add(email)
-        return {'sent':sent,'blocked':blocked,'evidence':'Existing CRM and permitted-route gates evaluated; provider receipts required for sends'}
+        return {'sent':sent,'blocked':blocked,'cost_logged':cost_logged,'evidence':'Existing CRM and permitted-route gates evaluated; provider receipts required for sends'}
     def review(self,job):
         return self.cp.rpc('company_growth_review',{'p_run_id':job['run_id']})
     def execute(self,job):
@@ -242,7 +258,8 @@ class GrowthExecutor:
         if handler is None:raise ValueError('UNKNOWN_GROWTH_TASK')
         try:
             result=handler(job)
-            self.cp.rpc('company_growth_zero_cost',{'p_task_id':job['id'],'p_service':job['task_type']})
+            if not result.get('cost_logged'):
+                self.cp.rpc('company_growth_zero_cost',{'p_task_id':job['id'],'p_service':job['task_type']})
             self.cp.complete_task(job['id'],AGENT,result,{'passed':True,'evidence':result.get('evidence','Persisted CEO review decision')})
             self.cp.receive_result(job['id'])
             return result
