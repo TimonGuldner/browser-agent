@@ -11,7 +11,7 @@ from agent.ai_control import (
     route_request, validate_output,
 )
 from agent import llm_router
-from agent.cost_control import BudgetBlocked
+from agent.cost_control import BudgetBlocked, nonessential_budget_block
 
 
 SCHEMA = {
@@ -108,6 +108,17 @@ class AIControlTests(unittest.TestCase):
             with self.assertRaises(BudgetBlocked):
                 llm_router.text_complete("classify", model_tier=TIER_1)
         self.assertEqual(authorize.call_count, 1)
+
+    def test_nonessential_work_is_deferred_before_paid_routing(self):
+        block = nonessential_budget_block({
+            "limit_eur": 30, "remaining_eur": 25.8,
+            "projected_spend_eur": 30.6, "hard_stop": False,
+        })
+        self.assertEqual(block["reason"], "PROJECTED_30D_BUDGET_EXCEEDED")
+        self.assertIsNone(nonessential_budget_block({
+            "limit_eur": 30, "remaining_eur": 25.8,
+            "projected_spend_eur": 4.2, "hard_stop": False,
+        }))
 
     def test_output_validation_rejects_private_reasoning(self):
         errors = validate_output({**VALID, "chain_of_thought": "secret"}, SCHEMA, 0.8)

@@ -56,6 +56,26 @@ def budget_status() -> Mapping[str, Any] | None:
         return None
 
 
+def nonessential_budget_block(status: Mapping[str, Any] | None = None) -> Mapping[str, Any] | None:
+    """Return a deterministic defer reason before a nonessential AI job runs.
+
+    This is an optimization only; ``company_authorize_spend`` remains the
+    authoritative transactional guard and still fails closed if this snapshot
+    is unavailable or races with another reservation.
+    """
+    snapshot = status if status is not None else budget_status()
+    if not snapshot:
+        return None
+    limit_eur = Decimal(str(snapshot.get("limit_eur") or 30))
+    remaining_eur = Decimal(str(snapshot.get("remaining_eur") or 0))
+    projected_eur = Decimal(str(snapshot.get("projected_spend_eur") or 0))
+    if bool(snapshot.get("hard_stop")) or remaining_eur <= 0:
+        return {"reason": "ROLLING_30_DAY_HARD_CAP", "budget": dict(snapshot)}
+    if projected_eur > limit_eur:
+        return {"reason": "PROJECTED_30D_BUDGET_EXCEEDED", "budget": dict(snapshot)}
+    return None
+
+
 def authorize_and_book_estimate(*, provider: str, service: str, amount_eur: Decimal | str,
                                 task_type: str, model_tier: str = "small",
                                 difficult_decision: bool = False, essential: bool = False, metadata: Mapping[str, Any] | None = None) -> str:

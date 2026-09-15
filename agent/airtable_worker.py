@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from browser_use import Agent as BrowserUseAgent
@@ -10,6 +11,7 @@ from agent import local_worker
 from agent import profile_patch
 from agent import lead_v3
 from agent import llm_router
+from agent import cost_control
 
 MONTHLY_OPENAI_BUDGET_USD = max(0.50, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "10")))
 
@@ -152,6 +154,33 @@ async def cost_optimized_run_agent_job(db, job: dict[str, Any]) -> None:
     if task_type == llm_router.TASK_DETERMINISTIC:
         await lead_v3.run_deterministic_research(db, job)
         return
+
+    # Do not turn an expected CFO decision into a failed browser job. Keep the
+    # canonical task queued for the next daily budget window without consuming
+    # an attempt; the transactional spend guard remains authoritative later.
+    if not bool(input_data.get("essential_ai")):
+        budget_block = cost_control.nonessential_budget_block()
+        if budget_block:
+            tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+            defer_until = datetime.combine(tomorrow, datetime.min.time(), tzinfo=timezone.utc) + timedelta(minutes=5)
+            local_worker.update_job(
+                db, job_id, status="queued", assigned_agent_id=None,
+                locked_at=None, locked_by=None, error=None,
+                available_at=defer_until.isoformat(),
+                result={
+                    "budget_deferred": True,
+                    "reason": budget_block["reason"],
+                    "retry_after": defer_until.isoformat(),
+                    "llm_skipped": True,
+                    "estimated_cost_usd": 0.0,
+                },
+            )
+            local_worker.add_event(
+                db, job_id, "cost_gate.deferred",
+                "Nonessential AI browser task deferred to the next budget window",
+                {"reason": budget_block["reason"], "retry_after": defer_until.isoformat()},
+            )
+            return
 
     if scheduled and role == "inbox":
         gate = await evaluate_inbox_gate(db)

@@ -6,3 +6,4 @@ Wake: 2026-09-14 — sender pagination and unique-email dedupe fixed; process al
 Wake: 2026-09-15 — run controlled Run-4 same-task recovery and verify live owned distribution; keep test evidence excluded from business KPIs.
 Wake: 2026-09-15 — verify CFO terminal routing, deterministic repair guards, and canonical worker idle heartbeat on the hardened head.
 Wake: 2026-09-15 — verify database-side watchdog cadence, explicit AI budget-block telemetry, and idempotent shared-incident escalation.
+Wake: 2026-09-15 — defer nonessential paid browser work at the CFO preflight without failure or attempt consumption; keep deterministic work active.

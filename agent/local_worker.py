@@ -50,7 +50,7 @@ def update_job(db: Client, job_id: str, **fields: Any) -> None:
 
 
 def add_event(db: Client, job_id: str, event_type: str, message: str, data: dict[str, Any] | None = None) -> None:
-    status = "failed" if event_type.endswith("failed") else "completed" if event_type.endswith(("finished", "saved")) else "running"
+    status = "failed" if event_type.endswith("failed") else "completed" if event_type.endswith(("finished", "saved")) else "queued" if event_type.endswith("deferred") else "running"
     db.rpc("company_record_event", {
         "p_run_id": None, "p_agent_id": WORKER_ID, "p_department": None, "p_task_id": job_id,
         "p_event_type": event_type, "p_status": status, "p_message": message,
