@@ -1,1 +1,1 @@
-Run 3 controlled queue acceptance: 2026-09-15
+Run 3 final live distribution acceptance: 2026-09-15T03:40Z

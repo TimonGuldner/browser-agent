@@ -257,6 +257,7 @@ class GrowthExecutor:
             for kind in ('growth_analyze','growth_convert'):
                 self.enqueue(run['id'],kind,{},kind+':'+run['id']+':'+datetime.now(timezone.utc).strftime('%Y-%m-%d-%H'),650)
             self.cp.rpc('company_growth_review',{'p_run_id':run['id']})
+            self.cp.rpc('company_growth_portfolio',{'p_run_id':run['id']})
             CEOOrchestrator(self.cp).cycle(run['id'])
         for _ in range(min(limit,12)):
             rows=self.cp.rpc('claim_agent_job',{'p_worker':AGENT})
@@ -272,4 +273,6 @@ def main():
     if args.command=='audit':html,_,_=fetch_owned(args.url);out=audit_opportunity(args.url,html)
     else:out=GrowthExecutor(ControlPlaneClient()).tick()
     print(json.dumps(out,ensure_ascii=False,default=str))
+    if isinstance(out,list) and any(isinstance(x,dict) and x.get('failed') for x in out):
+        raise SystemExit(1)
 if __name__=='__main__':main()
