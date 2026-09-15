@@ -1,0 +1,32 @@
+name: LOCENIX Growth Execution Acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [wake_growth.txt]
+permissions:
+  contents: read
+concurrency:
+  group: locenix-growth-acceptance
+  cancel-in-progress: false
+jobs:
+  growth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_URL: https://lzqybaxpgwkqyysluivg.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      AIRTABLE_PAT: ${{ secrets.AIRTABLE_PAT }}
+      AIRTABLE_SALES_BASE_ID: appuPKnVyLsbWbxMR
+      AIRTABLE_SALES_TABLE_ID: tblF4ghkYFzkeQwsT
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Real transaction-rollback database acceptance
+        run: PYTHONPATH=. python tests/integration_control_plane.py
+      - name: Execute bounded real growth queue
+        run: python -m agent.growth_execution tick
