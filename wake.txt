@@ -4,3 +4,4 @@ Revenue opportunities outrank cold activity; compliance remains fail-closed.
 Email Send Approved is the upstream authorization source of truth; DNC, terminal state, duplicate/history and technical readiness remain hard stops.
 Wake: 2026-09-14 — sender pagination and unique-email dedupe fixed; process all eligible unique approved inventory through COPY -> SEND -> VERIFY now.
 Wake: 2026-09-15 — run controlled Run-4 same-task recovery and verify live owned distribution; keep test evidence excluded from business KPIs.
+Wake: 2026-09-15 — verify CFO terminal routing, deterministic repair guards, and canonical worker idle heartbeat on the hardened head.
