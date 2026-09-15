@@ -472,6 +472,16 @@ async def process_once() -> int:
         update_job(db, job_id, status="failed", error=str(exc)[:10000])
         add_event(db, job_id, "worker.failed", "Job failed", {"error": str(exc)[:2000]})
         return 1
+    finally:
+        try:
+            db.rpc("company_heartbeat", {
+                "p_agent_id": WORKER_ID, "p_status": "idle", "p_task_id": None,
+                "p_metadata": {"source": "worker_process_finally"},
+            }).execute()
+        except Exception:
+            # Versioned ad-hoc workers may not be registry members; their task
+            # outcome is still durable and the canonical worker is monitored.
+            pass
 
 
 def main() -> None:

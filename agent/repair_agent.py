@@ -25,6 +25,7 @@ KNOWN_RETRYABLE_MARKERS = (
 )
 HARD_BLOCK_MARKERS = (
     "captcha", "2fa", "checkpoint", "authwall", "human verification", "monthly llm budget",
+    "cfo_budget_blocked", "projected_30d_budget_exceeded",
     "airtable_pat is not configured", "missing api secret",
 )
 EDITABLE_FILES = {
