@@ -24,6 +24,11 @@ def email_gate(f: dict, *, require_copy: bool = True) -> Gate:
         return Gate(False, "NO_EMAIL")
     if not bool(f.get("Email Send Approved")):
         return Gate(False, "APPROVAL_REQUIRED")
+    # Run 3 requires a documented route, not a researched address or checkbox alone.
+    from agent.growth_execution import permitted_route
+    permitted, reason = permitted_route(f)
+    if not permitted:
+        return Gate(False, reason)
     if f.get("Email Sent At"):
         return Gate(False, "ALREADY_CONTACTED")
     if require_copy:

@@ -13,6 +13,12 @@ from agent.control_plane import ControlPlaneClient
 
 def main() -> None:
     cp = ControlPlaneClient()
+    active = cp.get("company_runs", "status=eq.running&select=id")
+    if active:
+        result = cp.rpc("company_growth_selftest", {"p_run_id": active[0]["id"]})
+        assert all(result.get(key) is True for key in ("task_lifecycle", "SCALE", "ITERATE", "PAUSE", "KILL", "rolled_back", "test_metrics_rejected")), result
+        print(json.dumps({"mode": "transaction_rollback_against_active_run", **result}))
+        return
     marker = uuid4().hex
     run_id = cp.create_run(
         f"Control-plane CI canary {marker}",

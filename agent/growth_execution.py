@@ -19,7 +19,7 @@ AGENT = 'GROWTH_EXECUTOR'
 METRICS = ('revenue','customers','trials','visibility_checks','qualified_traffic','clicks','impressions')
 DEPARTMENTS = {'growth_discover':'OPPORTUNITY','growth_seo':'SEO', 'growth_distribute':'DISTRIBUTION',
               'growth_outreach':'OUTREACH','growth_analyze':'ANALYTICS','growth_convert':'CONVERSION',
-              'growth_review':'CEO'}
+              'growth_review':'CEO','growth_route_review':'OUTREACH'}
 OWNED_HOSTS = {'locenix.com','www.locenix.com'}
 
 
@@ -117,7 +117,7 @@ def channel_rank(rows):
 
 
 class GrowthExecutor:
-    def __init__(self,cp):self.cp=cp
+    def __init__(self,cp,external_transport=None):self.cp=cp;self.external_transport=external_transport
     def enqueue(self,run,kind,payload,key,priority=700):
         return self.cp.create_task(run,DEPARTMENTS[kind],kind,payload.get('recommended_action',kind),priority,
                                   {**payload,'runtime_adapter':'growth'},key)
@@ -133,6 +133,13 @@ class GrowthExecutor:
             task=self.enqueue(job['run_id'],'growth_seo',{'url':url,'opportunity_key':digest(url),'action':'inspect',
                 'recommended_action':op['recommended_action']},'growth-seo:'+job['run_id']+':'+digest(url))
             found.append({'opportunity':oid,'task_id':task,'source':url})
+        if job['input'].get('include_scout'):
+            from agent.growth_opportunities import discover_signals
+            for op in discover_signals():
+                oid=self.cp.rpc('company_remember',{'p_scope':'growth_opportunity','p_key':digest(op['source']),
+                    'p_value':op,'p_source':op['source'],'p_run_id':job['run_id'],'p_department':'OPPORTUNITY'})
+                task=self.enqueue(job['run_id'],'growth_route_review',op,'route-review:'+job['run_id']+':'+digest(op['source']),850 if op['intent']=='buyer_problem' else 550)
+                found.append({'opportunity':oid,'task_id':task,'source':op['source']})
         return {'opportunities':found,'evidence':'Live owned BOFU pages audited; durable downstream tasks created'}
     def seo(self,job):
         data=job['input'];html,status,url=fetch_owned(data['url']);page=Page();page.feed(html)
@@ -147,9 +154,10 @@ class GrowthExecutor:
         path=patch['path']
         if not path.startswith('src/app/blog/') or not path.endswith('/page.tsx'):raise ValueError('PATCH_PATH_NOT_ALLOWED')
         token=os.environ.get('PRODUCT_GITHUB_TOKEN')
-        if not token:raise RuntimeError('PRODUCT_GITHUB_TOKEN_MISSING')
+        if not token and not self.external_transport:raise RuntimeError('PRODUCT_GITHUB_TOKEN_MISSING')
         endpoint='https://api.github.com/repos/TimonGuldner/localboost-ai/contents/'+path
         def api(method,payload=None):
+            if self.external_transport:return self.external_transport('github',{'method':method,'path':path,'payload':payload})
             req=urllib.request.Request(endpoint,data=json.dumps(payload).encode() if payload else None,method=method,
               headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
@@ -175,9 +183,18 @@ class GrowthExecutor:
                 'evidence':'Live HTML contains exact attributed CTA and destination returns HTTP 200',
                 'business_outcome':'pending_observation','synthetic_probe':True}
     def analyze(self,job):
+        from agent.growth_analytics import import_product,product_client
+        self.cp.rpc('company_growth_request_sync',{})
+        product=product_client()
+        imported=import_product(self.cp,product,job['run_id']) if product else {'status':'async_product_sync_requested_or_cached'}
         rows=self.cp.get('company_metric_events',f"run_id=eq.{job['run_id']}&select=metric_key,value,dimensions,occurred_at&limit=10000")
         ranking,channels=channel_rank(rows);out=funnel(rows)
-        out.update({'channels':channels,'ranking':ranking,'evidence':'Persisted deduplicated production metric events read'})
+        groups={}
+        for dimension in ('channel','campaign','audience'):
+            buckets={}
+            for row in rows:buckets.setdefault(row.get('dimensions',{}).get(dimension,'unattributed'),[]).append(row)
+            groups[dimension]={key:funnel(values) for key,values in buckets.items()}
+        out.update({'groups':groups,'import':imported,'channels':channels,'ranking':ranking,'evidence':'Persisted deduplicated production metric events read'})
         self.cp.rpc('company_remember',{'p_scope':'growth_analytics','p_key':job['run_id'],'p_value':out,
           'p_source':'company_metric_events','p_run_id':job['run_id'],'p_department':'ANALYTICS'})
         return out
@@ -185,6 +202,16 @@ class GrowthExecutor:
         report=self.analyze(job)
         return {'bottleneck':report['bottleneck'],'action':'review_targeted_experiment' if report['bottleneck'] else 'collect_identity_bearing_funnel_data',
                 'evidence':report['evidence'],'rates':report['rates']}
+    def route_review(self,job):
+        allowed,reason=permitted_route(job['input'])
+        # Researched third-party mentions do not themselves authorize promotion.
+        # Keep a precise gate in memory rather than sending or retrying blindly.
+        value={'source':job['input']['source'],'permitted':allowed,'reason':reason,
+               'next_action':'Supply platform rules and a current, explicit contact basis before contact'}
+        self.cp.rpc('company_remember',{'p_scope':'contact_route','p_key':digest(value['source']),
+            'p_value':value,'p_source':value['source'],'p_run_id':job['run_id'],'p_department':'OUTREACH'})
+        return {**value,'evidence':'Existing scout evidence evaluated; no permitted contact basis supplied; no message sent'}
+
     def outreach(self,job):
         # Reuse existing sender and CRM, but never equate a researched email with consent.
         from agent import email_outreach_worker as sender
@@ -211,7 +238,7 @@ class GrowthExecutor:
     def execute(self,job):
         self.cp.heartbeat(AGENT,'busy',job['id'])
         handler={'growth_discover':self.discover,'growth_seo':self.seo,'growth_distribute':self.distribute,
-          'growth_analyze':self.analyze,'growth_convert':self.convert,'growth_outreach':self.outreach,'growth_review':self.review}.get(job['task_type'])
+          'growth_analyze':self.analyze,'growth_convert':self.convert,'growth_outreach':self.outreach,'growth_review':self.review,'growth_route_review':self.route_review}.get(job['task_type'])
         if handler is None:raise ValueError('UNKNOWN_GROWTH_TASK')
         try:
             result=handler(job)
@@ -227,6 +254,8 @@ class GrowthExecutor:
         results=[]
         runs=self.cp.get('company_runs','status=eq.running&select=id')
         for run in runs:
+            for kind in ('growth_analyze','growth_convert'):
+                self.enqueue(run['id'],kind,{},kind+':'+run['id']+':'+datetime.now(timezone.utc).strftime('%Y-%m-%d-%H'),650)
             self.cp.rpc('company_growth_review',{'p_run_id':run['id']})
             CEOOrchestrator(self.cp).cycle(run['id'])
         for _ in range(min(limit,12)):
