@@ -51,6 +51,12 @@ class ResiliencePolicyTests(unittest.TestCase):
     def test_classification_is_deterministic(self):
         self.assertEqual(classify_failure("Deployment not yet verified")[0], "DEPLOYMENT_PENDING")
 
+    def test_budget_guard_is_a_runbook_not_an_owner_gate(self):
+        plan = plan_recovery("Monthly LLM budget hard stop", attempt=0, max_attempts=3)
+        self.assertEqual(plan.failure_code, "CFO_BUDGET_GUARD")
+        self.assertEqual(plan.ai_tier, "deterministic")
+        self.assertFalse(plan.human_gate)
+
 
 if __name__ == "__main__":
     unittest.main()

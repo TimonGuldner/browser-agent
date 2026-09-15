@@ -11,8 +11,11 @@ HUMAN_GATES = {
     "captcha": "CAPTCHA", "2fa": "TWO_FACTOR_AUTH", "human verification": "HUMAN_VERIFICATION",
     "payment approval": "PAYMENT_APPROVAL", "legal approval": "LEGAL_APPROVAL",
     "account restriction": "ACCOUNT_RESTRICTION", "checkpoint": "ACCOUNT_CHECKPOINT",
+    "missing api secret": "CREDENTIAL_CONFIGURATION",
+    "airtable_pat is not configured": "CREDENTIAL_CONFIGURATION",
 }
 RUNBOOKS = (
+    (("monthly llm budget", "cfo_budget_blocked", "hard budget"), "CFO_BUDGET_GUARD", "cost", "pause_paid_path_and_route_deterministic"),
     (("deployment_not_yet_verified", "deployment not yet verified"), "DEPLOYMENT_PENDING", "publishing", "verify_after_backoff"),
     (("timed out", "timeout", "connection reset"), "TRANSIENT_TIMEOUT", "runtime", "exponential_backoff"),
     (("stale", "heartbeat"), "STALE_WORKER_OR_TASK", "worker", "restart_or_requeue"),

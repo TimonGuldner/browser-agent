@@ -34,7 +34,7 @@ ANTHROPIC_CHEAP_MODEL = os.getenv("ANTHROPIC_CHEAP_MODEL", ANTHROPIC_DEFAULT_MOD
 ANTHROPIC_STANDARD_MODEL = os.getenv("ANTHROPIC_STANDARD_MODEL", ANTHROPIC_DEFAULT_MODEL).strip()
 ANTHROPIC_STRONG_MODEL = os.getenv("ANTHROPIC_STRONG_MODEL", ANTHROPIC_DEFAULT_MODEL).strip()
 GOOGLE_STANDARD_MODEL = os.getenv("GOOGLE_STANDARD_MODEL", GOOGLE_DEFAULT_MODEL).strip()
-GOOGLE_STRONG_MODEL = os.getenv("GOOGLE_STRONG_MODEL", GOOGLE_DEFAULT_MODEL).strip()
+GOOGLE_STRONG_MODEL = os.getenv("GOOGLE_STRONG_MODEL", "").strip()
 
 # Gemini quotas are model-specific. Use a model pool so a 429 on one Gemini model
 # can move to another Gemini model before falling back to a paid provider.
@@ -110,7 +110,9 @@ def _discover(prefix: str, provider: str, model: str, model_tier: str = TIER_CHE
 
 def _google_model_chain(task_type: str, model_tier: str = TIER_CHEAP) -> tuple[str, ...]:
     if model_tier == TIER_STRONG:
-        chain = ((GOOGLE_STRONG_MODEL,) if GOOGLE_STRONG_MODEL else ()) + GOOGLE_FLASH_MODELS
+        # Never mislabel a standard Flash model as strong. Strong Google routing
+        # exists only when an explicit approved strong model is configured.
+        return (GOOGLE_STRONG_MODEL,) if GOOGLE_STRONG_MODEL else ()
     elif model_tier == TIER_STANDARD:
         chain = ((GOOGLE_STANDARD_MODEL,) if GOOGLE_STANDARD_MODEL else ()) + GOOGLE_FLASH_MODELS + GOOGLE_LITE_MODELS
     elif task_type in {TASK_CHEAP_CLASSIFICATION, TASK_PERSONALIZATION, TASK_CONTENT}:
@@ -370,6 +372,10 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 raise RuntimeError(f"LLM returned empty text; finish_reason={reason}")
             cost_control.finalize_ai_usage(reservation, meta, result_status="completed")
             return text, meta
+        except cost_control.BudgetBlocked:
+            # A CFO denial is a terminal routing decision, not provider failure.
+            # Do not fail over providers or escalate model tiers after it.
+            raise
         except Exception as exc:
             last_error = exc
             err = str(exc)

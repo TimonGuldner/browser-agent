@@ -58,6 +58,15 @@ def add_event(db: Client, job_id: str, event_type: str, message: str, data: dict
     }).execute()
 
 
+def confirm_recovery(db: Client, job: dict[str, Any], evidence: str) -> None:
+    if not (job.get("input") or {}).get("recovery_incident_id"):
+        return
+    db.rpc("company_recovery_confirm", {
+        "p_task_id": str(job["id"]),
+        "p_verification": {"passed": True, "evidence": evidence},
+    }).execute()
+
+
 def claim_next_job(db: Client) -> dict[str, Any] | None:
     response = db.rpc("claim_agent_job", {"p_worker": WORKER_ID}).execute()
     if not response.data:
@@ -427,8 +436,13 @@ async def run_agent_job(db: Client, job: dict[str, Any]) -> None:
                     "is_done": history.is_done(),
                 },
             }).execute()
+            confirm_recovery(db, job, "browser-use history reports is_done and is_successful")
         else:
-            update_job(db, job_id, status="completed" if history.is_successful() else "failed", result=result)
+            if history.is_successful():
+                update_job(db, job_id, status="completed", result=result, verification_status="passed", completed_at=now_iso())
+                confirm_recovery(db, job, "browser-use history reports is_done and is_successful")
+            else:
+                update_job(db, job_id, status="failed", result=result, verification_status="failed")
         add_event(db, job_id, "browser.task_finished", "Local browser task finished", {"successful": history.is_successful()})
     finally:
         try:

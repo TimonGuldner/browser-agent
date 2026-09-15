@@ -11,6 +11,7 @@ from typing import Any
 from supabase import Client, create_client
 from agent import llm_router
 from agent.ai_control import AIControl, AIRequest
+from agent.resilience import RecoveryPlan, plan_recovery
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -81,6 +82,59 @@ def has_repair_activity(db: Client, job_id: str) -> bool:
 
 def add_event(db: Client, job_id: str, event_type: str, message: str, data: dict[str, Any] | None = None) -> None:
     db.table("agent_events").insert({"job_id": job_id, "event_type": event_type, "message": message, "data": data or {}}).execute()
+
+
+def ensure_incident(db: Client, job: dict[str, Any]) -> tuple[str, RecoveryPlan]:
+    failure = job_text(job)
+    plan = plan_recovery(
+        failure, attempt=int(job.get("attempt") or 0),
+        max_attempts=int(job.get("max_attempts") or 3), component="runtime",
+        business_impact="high",
+    )
+    incident_id = db.rpc("company_incident_open", {
+        "p_job_id": str(job["id"]), "p_component": plan.component,
+        "p_error_type": "execution", "p_failure_code": plan.failure_code,
+        "p_severity": "critical" if plan.human_gate else "high",
+        "p_diagnosis": failure[:2000], "p_fingerprint": plan.fingerprint,
+        "p_ai_tier": plan.ai_tier,
+    }).execute().data
+    return str(incident_id), plan
+
+
+def transition(db: Client, incident_id: str, status: str, level: str, reason: str,
+               patch: dict[str, Any] | None = None) -> None:
+    db.rpc("company_incident_transition", {
+        "p_incident_id": incident_id, "p_status": status, "p_level": level,
+        "p_reason": reason[:1200], "p_patch": patch or {},
+    }).execute()
+
+
+def reconcile_repair_tests(db: Client) -> list[dict[str, str]]:
+    """A passing child test enables a bounded retry of the original task."""
+    rows = db.table("agent_jobs").select("id,input,result,verification_status").eq("status", "completed").order("updated_at", desc=True).limit(100).execute().data or []
+    retried: list[dict[str, str]] = []
+    for row in rows:
+        original_id = str((row.get("input") or {}).get("repair_of") or "")
+        if not original_id:
+            continue
+        incidents = db.table("company_incidents").select("id,status,escalation_level").eq("job_id", original_id).in_("status", ["repairing", "diagnosing", "escalated"]).limit(1).execute().data or []
+        if not incidents:
+            continue
+        incident = incidents[0]
+        evidence = {"test_task_id": str(row["id"]), "test_verification": row.get("verification_status"), "test_result": row.get("result") or {}}
+        transition(db, str(incident["id"]), "verifying", str(incident.get("escalation_level") or "L3"), "Controlled repair test passed", {"verification": evidence})
+        db.rpc("company_record_event", {
+            "p_run_id": None, "p_agent_id": "CTO", "p_department": "CTO",
+            "p_task_id": original_id, "p_event_type": "TEST_PASS", "p_status": "completed",
+            "p_message": "Controlled repair test passed", "p_cost_eur": 0, "p_metadata": evidence,
+        }).execute()
+        ok = db.rpc("company_recovery_retry", {
+            "p_incident_id": str(incident["id"]), "p_backoff_seconds": 0,
+            "p_task_id": original_id,
+        }).execute().data
+        if ok:
+            retried.append({"original_task_id": original_id, "test_task_id": str(row["id"]), "incident_id": str(incident["id"])})
+    return retried
 
 
 def repo_context() -> str:
@@ -224,35 +278,48 @@ def enqueue_controlled_test(db: Client, job: dict[str, Any], commit_sha: str | N
 
 
 def run() -> dict[str, Any]:
+    db = db_client()
+    recovered_tests = reconcile_repair_tests(db)
     router = llm_router.router_status(llm_router.TASK_REPAIR_ANALYSIS)
     if not router["slots"]:
-        return {"enabled": False, "reason": "No repair-capable LLM provider configured", "router": router}
-    db = db_client()
+        return {"enabled": False, "reason": "No repair-capable LLM provider configured", "router": router, "recovered_tests": recovered_tests}
     failed_after = (datetime.now(timezone.utc) - timedelta(hours=FAILED_LOOKBACK_HOURS)).isoformat()
-    failed = db.table("agent_jobs").select("id,status,created_at,updated_at,task,mode,priority,max_steps,input,error,result").eq("status", "failed").gte("updated_at", failed_after).order("updated_at", desc=True).limit(30).execute().data or []
+    failed = db.table("agent_jobs").select("id,status,created_at,updated_at,task,mode,priority,max_steps,input,error,result,run_id,department,assigned_agent_id,attempt,max_attempts").eq("status", "failed").gte("updated_at", failed_after).order("updated_at", desc=True).limit(30).execute().data or []
     for job in failed:
         job_id = str(job["id"])
+        incident_id, recovery = ensure_incident(db, job)
+        if recovery.human_gate:
+            transition(db, incident_id, "human_gate", "L5", "A genuine credential or platform verification gate requires an authorized person")
+            continue
+        if is_hard_block(job):
+            transition(db, incident_id, "escalated", "L1", "Deterministic guard stopped unsafe or over-budget repair", {"prevention_rule": recovery.action})
+            continue
         if not needs_llm_repair(job) or has_repair_activity(db, job_id):
             continue
+        transition(db, incident_id, "diagnosing", "L2", "Specialist diagnosis started after deterministic runbook lookup", {"ai_tier": recovery.ai_tier})
         add_event(db, job_id, "repair.started", "Routed LLM repair diagnosis started", {"router": router})
         try:
             proposal, meta = request_repair(job)
             reason = str(proposal.get("reason") or "No reason supplied")
+            ai_tier = str(meta.get("model_tier") or recovery.ai_tier)
             add_event(db, job_id, "repair.diagnosed", reason, {"proposal": proposal, "llm": meta})
             applied, state = apply_and_validate(proposal)
             if not applied:
+                transition(db, incident_id, "escalated", "L3", "CTO received diagnosis but no safe patch was validated", {"root_cause": reason, "ai_tier": ai_tier})
                 add_event(db, job_id, "repair.escalated", "Repair did not auto-patch; diagnosis recorded", {"state": state, "reason": reason, "llm": meta})
-                return {"job_id": job_id, "action": "diagnose", "state": state, "reason": reason, "llm": meta}
+                return {"job_id": job_id, "incident_id": incident_id, "action": "diagnose", "state": state, "reason": reason, "llm": meta, "recovered_tests": recovered_tests}
+            transition(db, incident_id, "repairing", "L3", "Validated minimal patch prepared", {"root_cause": reason, "ai_tier": ai_tier})
             commit_sha = commit_and_push(reason)
             add_event(db, job_id, "repair.patch_applied", "Validated repair committed and pushed", {"commit_sha": commit_sha, "reason": reason, "llm": meta})
             test_id = enqueue_controlled_test(db, job, commit_sha)
             if test_id:
                 add_event(db, job_id, "repair.test_enqueued", "Controlled post-repair test job queued", {"test_job_id": test_id, "commit_sha": commit_sha})
-            return {"job_id": job_id, "action": "patch", "commit_sha": commit_sha, "test_job_id": test_id, "reason": reason, "llm": meta}
+            return {"job_id": job_id, "incident_id": incident_id, "action": "patch", "commit_sha": commit_sha, "test_job_id": test_id, "reason": reason, "llm": meta, "recovered_tests": recovered_tests}
         except Exception as exc:
+            transition(db, incident_id, "escalated", "L3", "Repair agent failed safely and stopped before deployment", {"root_cause": str(exc)[:1000]})
             add_event(db, job_id, "repair.escalated", "Repair agent failed safely", {"error": str(exc)[:1800]})
-            return {"job_id": job_id, "action": "failed_safe", "error": str(exc)}
-    return {"action": "none", "reason": "No eligible failed job requires LLM repair", "router": router}
+            return {"job_id": job_id, "incident_id": incident_id, "action": "failed_safe", "error": str(exc), "recovered_tests": recovered_tests}
+    return {"action": "none", "reason": "No eligible failed job requires LLM repair", "router": router, "recovered_tests": recovered_tests}
 
 
 def main() -> None:

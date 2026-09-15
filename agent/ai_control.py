@@ -217,6 +217,12 @@ class AIControl:
                     )
                 value = _clean_json(text)
                 errors = validate_output(value, schema, request.confidence_required)
+            except cost_control.BudgetBlocked:
+                cost_control.ai_event(
+                    "AI_BUDGET_BLOCKED", "blocked", "CFO guard stopped AI routing without tier escalation",
+                    {"tier": tier, "task_type": request.task_type},
+                )
+                raise
             except Exception as exc:
                 value, provider_meta, errors = {}, {}, [f"provider_or_parse:{type(exc).__name__}"]
             if not errors:

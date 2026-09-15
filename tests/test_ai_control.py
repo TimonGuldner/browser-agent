@@ -11,6 +11,7 @@ from agent.ai_control import (
     route_request, validate_output,
 )
 from agent import llm_router
+from agent.cost_control import BudgetBlocked
 
 
 SCHEMA = {
@@ -82,6 +83,32 @@ class AIControlTests(unittest.TestCase):
         ))
         self.assertNotIn(TIER_3, route.allowed_tiers)
 
+    def test_runtime_budget_block_does_not_escalate_tier(self):
+        tiers = []
+        def provider(_prompt, _task, tier, _max, _essential):
+            tiers.append(tier)
+            raise BudgetBlocked("projected spend guard")
+        request = AIRequest(
+            task_type="unknown_production_error", purpose="repair", complexity=0.95,
+            risk="high", expected_value_eur=Decimal("100"), confidence_required=0.9,
+        )
+        with patch("agent.ai_control.cost_control.ai_event") as event:
+            with self.assertRaises(BudgetBlocked):
+                AIControl(provider).execute("diagnose", request, SCHEMA)
+        self.assertEqual(tiers, [TIER_2])
+        self.assertIn("AI_BUDGET_BLOCKED", [call.args[0] for call in event.call_args_list])
+
+    def test_provider_router_does_not_fail_over_after_cfo_denial(self):
+        slots = [
+            llm_router.ProviderSlot("google", "GOOGLE_API_KEY", "google_1", "cheap-a", TIER_1),
+            llm_router.ProviderSlot("openai", "OPENAI_API_KEY", "openai_1", "cheap-b", TIER_1),
+        ]
+        with patch.object(llm_router, "configured_slots", return_value=slots), \
+             patch("agent.llm_router.cost_control.authorize_and_book_estimate", side_effect=BudgetBlocked("denied")) as authorize:
+            with self.assertRaises(BudgetBlocked):
+                llm_router.text_complete("classify", model_tier=TIER_1)
+        self.assertEqual(authorize.call_count, 1)
+
     def test_output_validation_rejects_private_reasoning(self):
         errors = validate_output({**VALID, "chain_of_thought": "secret"}, SCHEMA, 0.8)
         self.assertIn("forbidden:chain_of_thought", errors)
@@ -138,6 +165,13 @@ class AIControlTests(unittest.TestCase):
         self.assertTrue(slots)
         self.assertEqual(slots[0].model, "configured-strong")
         self.assertEqual(slots[0].model_tier, TIER_3)
+
+    def test_standard_google_model_is_never_mislabeled_strong(self):
+        with patch.dict(os.environ, {
+            "GOOGLE_API_KEY": "configured", "LOCENIX_STRONG_PROVIDER_ORDER": "google",
+        }, clear=False), patch.object(llm_router, "GOOGLE_STRONG_MODEL", ""):
+            slots = llm_router.configured_slots(llm_router.TASK_HIGH_REASONING, TIER_3)
+        self.assertEqual(slots, [])
 
 
 if __name__ == "__main__":
