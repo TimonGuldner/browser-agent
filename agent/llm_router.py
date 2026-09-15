@@ -8,8 +8,6 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-from browser_use import ChatAnthropic, ChatBrowserUse, ChatGoogle, ChatOpenAI
-
 from agent import cost_control
 
 TASK_DETERMINISTIC = "deterministic"
@@ -21,10 +19,22 @@ TASK_REPAIR_ANALYSIS = "repair_analysis"
 TASK_BROWSER_REASONING = "browser_reasoning"
 TASK_HIGH_REASONING = "high_reasoning"
 
+TIER_CHEAP = "cheap"
+TIER_STANDARD = "standard"
+TIER_STRONG = "strong"
+
 GOOGLE_DEFAULT_MODEL = os.getenv("GOOGLE_DEFAULT_MODEL", "gemini-3.6-flash").strip()
 OPENAI_DEFAULT_MODEL = os.getenv("OPENAI_DEFAULT_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-luna")).strip()
 ANTHROPIC_DEFAULT_MODEL = os.getenv("ANTHROPIC_DEFAULT_MODEL", "claude-sonnet-4-6").strip()
 BROWSER_USE_DEFAULT_MODEL = os.getenv("BROWSER_USE_DEFAULT_MODEL", "bu-latest").strip()
+OPENAI_CHEAP_MODEL = os.getenv("OPENAI_CHEAP_MODEL", OPENAI_DEFAULT_MODEL).strip()
+OPENAI_STANDARD_MODEL = os.getenv("OPENAI_STANDARD_MODEL", OPENAI_DEFAULT_MODEL).strip()
+OPENAI_STRONG_MODEL = os.getenv("OPENAI_STRONG_MODEL", "").strip()
+ANTHROPIC_CHEAP_MODEL = os.getenv("ANTHROPIC_CHEAP_MODEL", ANTHROPIC_DEFAULT_MODEL).strip()
+ANTHROPIC_STANDARD_MODEL = os.getenv("ANTHROPIC_STANDARD_MODEL", ANTHROPIC_DEFAULT_MODEL).strip()
+ANTHROPIC_STRONG_MODEL = os.getenv("ANTHROPIC_STRONG_MODEL", ANTHROPIC_DEFAULT_MODEL).strip()
+GOOGLE_STANDARD_MODEL = os.getenv("GOOGLE_STANDARD_MODEL", GOOGLE_DEFAULT_MODEL).strip()
+GOOGLE_STRONG_MODEL = os.getenv("GOOGLE_STRONG_MODEL", GOOGLE_DEFAULT_MODEL).strip()
 
 # Gemini quotas are model-specific. Use a model pool so a 429 on one Gemini model
 # can move to another Gemini model before falling back to a paid provider.
@@ -67,13 +77,14 @@ class ProviderSlot:
     env_name: str
     key_slot: str
     model: str
+    model_tier: str = TIER_CHEAP
 
     @property
     def key(self) -> str:
         return os.getenv(self.env_name, "").strip()
 
     def public(self) -> dict[str, Any]:
-        return {"provider": self.provider, "key_slot": self.key_slot, "model": self.model}
+        return {"provider": self.provider, "key_slot": self.key_slot, "model": self.model, "model_tier": self.model_tier}
 
 
 def _slot_number(name: str, prefix: str) -> int:
@@ -83,7 +94,9 @@ def _slot_number(name: str, prefix: str) -> int:
     return int(tail) if tail.isdigit() else 999999
 
 
-def _discover(prefix: str, provider: str, model: str) -> list[ProviderSlot]:
+def _discover(prefix: str, provider: str, model: str, model_tier: str = TIER_CHEAP) -> list[ProviderSlot]:
+    if not model:
+        return []
     names = [name for name, value in os.environ.items() if name.startswith(prefix) and str(value).strip()]
     names.sort(key=lambda n: (_slot_number(n, prefix), n))
     slots: list[ProviderSlot] = []
@@ -91,12 +104,16 @@ def _discover(prefix: str, provider: str, model: str) -> list[ProviderSlot]:
         slot_no = _slot_number(name, prefix)
         if slot_no == 999999:
             slot_no = idx
-        slots.append(ProviderSlot(provider, name, f"{provider}_{slot_no}", model))
+        slots.append(ProviderSlot(provider, name, f"{provider}_{slot_no}", model, model_tier))
     return slots
 
 
-def _google_model_chain(task_type: str) -> tuple[str, ...]:
-    if task_type in {TASK_CHEAP_CLASSIFICATION, TASK_PERSONALIZATION, TASK_CONTENT}:
+def _google_model_chain(task_type: str, model_tier: str = TIER_CHEAP) -> tuple[str, ...]:
+    if model_tier == TIER_STRONG:
+        chain = ((GOOGLE_STRONG_MODEL,) if GOOGLE_STRONG_MODEL else ()) + GOOGLE_FLASH_MODELS
+    elif model_tier == TIER_STANDARD:
+        chain = ((GOOGLE_STANDARD_MODEL,) if GOOGLE_STANDARD_MODEL else ()) + GOOGLE_FLASH_MODELS + GOOGLE_LITE_MODELS
+    elif task_type in {TASK_CHEAP_CLASSIFICATION, TASK_PERSONALIZATION, TASK_CONTENT}:
         chain = GOOGLE_LITE_MODELS + GOOGLE_FLASH_MODELS
     else:
         chain = GOOGLE_FLASH_MODELS + GOOGLE_LITE_MODELS
@@ -108,33 +125,58 @@ def _google_model_chain(task_type: str) -> tuple[str, ...]:
     return tuple(ordered)
 
 
-def _discover_google(task_type: str) -> list[ProviderSlot]:
+def _discover_google(task_type: str, model_tier: str = TIER_CHEAP) -> list[ProviderSlot]:
     names = [name for name, value in os.environ.items() if name.startswith("GOOGLE_API_KEY") and str(value).strip()]
     names.sort(key=lambda n: (_slot_number(n, "GOOGLE_API_KEY"), n))
     slots: list[ProviderSlot] = []
-    for model_index, model in enumerate(_google_model_chain(task_type), start=1):
+    for model_index, model in enumerate(_google_model_chain(task_type, model_tier), start=1):
         for idx, name in enumerate(names, start=1):
             slot_no = _slot_number(name, "GOOGLE_API_KEY")
             if slot_no == 999999:
                 slot_no = idx
             # Model suffix makes production failover telemetry unambiguous.
-            slots.append(ProviderSlot("google", name, f"google_{slot_no}_m{model_index}", model))
+            slots.append(ProviderSlot("google", name, f"google_{slot_no}_m{model_index}", model, model_tier))
     return slots
 
 
-def configured_slots(task_type: str = TASK_BROWSER_REASONING) -> list[ProviderSlot]:
+def default_tier(task_type: str) -> str:
+    if task_type == TASK_HIGH_REASONING:
+        return TIER_STRONG
+    if task_type in {TASK_REPAIR_ANALYSIS, TASK_BROWSER_REASONING, TASK_EXECUTIVE_ANALYSIS}:
+        return TIER_STANDARD
+    return TIER_CHEAP
+
+
+def _provider_order(model_tier: str, task_type: str) -> tuple[str, ...]:
+    env_name = f"LOCENIX_{model_tier.upper()}_PROVIDER_ORDER"
+    configured = tuple(x.strip() for x in os.getenv(env_name, "").split(",") if x.strip())
+    if configured:
+        return configured
+    if model_tier == TIER_STRONG:
+        return ("anthropic", "openai", "google")
+    return TASK_ORDERS.get(task_type, DEFAULT_ORDER)
+
+
+def configured_slots(task_type: str = TASK_BROWSER_REASONING, model_tier: str | None = None) -> list[ProviderSlot]:
     if task_type == TASK_DETERMINISTIC:
         return []
+    tier = model_tier or default_tier(task_type)
+    if tier not in {TIER_CHEAP, TIER_STANDARD, TIER_STRONG}:
+        raise ValueError(f"invalid model tier: {tier}")
     forced = os.getenv("LOCENIX_LLM_PROVIDER", "auto").strip().lower()
     by_provider = {
-        "google": _discover_google(task_type),
-        "openai": _discover("OPENAI_API_KEY", "openai", OPENAI_DEFAULT_MODEL),
-        "anthropic": _discover("ANTHROPIC_API_KEY", "anthropic", ANTHROPIC_DEFAULT_MODEL),
-        "browser_use": _discover("BROWSER_USE_API_KEY", "browser_use", BROWSER_USE_DEFAULT_MODEL),
+        "google": _discover_google(task_type, tier),
+        "openai": _discover("OPENAI_API_KEY", "openai", {
+            TIER_CHEAP: OPENAI_CHEAP_MODEL, TIER_STANDARD: OPENAI_STANDARD_MODEL, TIER_STRONG: OPENAI_STRONG_MODEL,
+        }[tier], tier),
+        "anthropic": _discover("ANTHROPIC_API_KEY", "anthropic", {
+            TIER_CHEAP: ANTHROPIC_CHEAP_MODEL, TIER_STANDARD: ANTHROPIC_STANDARD_MODEL, TIER_STRONG: ANTHROPIC_STRONG_MODEL,
+        }[tier], tier),
+        "browser_use": _discover("BROWSER_USE_API_KEY", "browser_use", BROWSER_USE_DEFAULT_MODEL, tier),
     }
     if forced != "auto":
         return list(by_provider.get(forced, []))
-    order = TASK_ORDERS.get(task_type, DEFAULT_ORDER)
+    order = _provider_order(tier, task_type)
     return [slot for provider in order for slot in by_provider.get(provider, [])]
 
 
@@ -192,14 +234,16 @@ def activate_slot(slot: ProviderSlot) -> None:
 
 
 def create_browser_llm(slot: ProviderSlot, *, reasoning_effort: str = "medium", max_completion_tokens: int = 3000):
-    cost_control.authorize_and_book_estimate(
+    from browser_use import ChatAnthropic, ChatBrowserUse, ChatGoogle, ChatOpenAI
+    reservation = cost_control.authorize_and_book_estimate(
         provider=slot.provider,
         service=slot.model,
         amount_eur=os.getenv("LOCENIX_BROWSER_LLM_MAX_COST_EUR", "0.12"),
         task_type=TASK_BROWSER_REASONING,
-        model_tier="small",
+        model_tier=slot.model_tier,
         metadata={"max_completion_tokens": max_completion_tokens},
     )
+    cost_control.record_ai_started(reservation, slot.public(), TASK_BROWSER_REASONING)
     activate_slot(slot)
     if slot.provider == "google":
         return ChatGoogle(model=slot.model)
@@ -234,23 +278,32 @@ def _google_generation_config(task_type: str, max_output_tokens: int) -> dict[st
     return config
 
 
-def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, max_output_tokens: int = 2600) -> tuple[str, dict[str, Any]]:
-    slots = [s for s in configured_slots(task_type) if s.provider != "browser_use"]
+def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, max_output_tokens: int = 2600,
+                  model_tier: str | None = None, essential: bool = False) -> tuple[str, dict[str, Any]]:
+    tier = model_tier or default_tier(task_type)
+    slots = [s for s in configured_slots(task_type, tier) if s.provider != "browser_use"]
     if not slots:
         raise RuntimeError("BLOCKED_LLM_PROVIDER: no text-capable provider configured")
     attempts: list[dict[str, Any]] = []
     last_error: Exception | None = None
     started_all = time.monotonic()
     for slot in slots:
+        reservation: str | None = None
         started = time.monotonic()
         try:
-            cost_control.authorize_and_book_estimate(
+            estimate = os.getenv({
+                TIER_CHEAP: "LOCENIX_CHEAP_LLM_MAX_COST_EUR",
+                TIER_STANDARD: "LOCENIX_STANDARD_LLM_MAX_COST_EUR",
+                TIER_STRONG: "LOCENIX_STRONG_LLM_MAX_COST_EUR",
+            }[tier], {TIER_CHEAP: "0.01", TIER_STANDARD: "0.03", TIER_STRONG: "0.20"}[tier])
+            reservation = cost_control.authorize_and_book_estimate(
                 provider=slot.provider,
                 service=slot.model,
-                amount_eur=os.getenv("LOCENIX_TEXT_LLM_MAX_COST_EUR", "0.03"),
+                amount_eur=estimate,
                 task_type=task_type,
-                model_tier="strong" if task_type == TASK_HIGH_REASONING else "small",
-                difficult_decision=task_type in {TASK_HIGH_REASONING, TASK_REPAIR_ANALYSIS},
+                model_tier=tier,
+                difficult_decision=tier == TIER_STRONG,
+                essential=essential,
                 metadata={"max_output_tokens": max_output_tokens},
             )
             if slot.provider == "google":
@@ -267,6 +320,7 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 meta = {
                     "provider": slot.provider, "model": slot.model, "key_slot": slot.key_slot,
                     "prompt_tokens": usage.get("promptTokenCount"), "completion_tokens": usage.get("candidatesTokenCount"),
+                    "cached_tokens": usage.get("cachedContentTokenCount"),
                     "thought_tokens": usage.get("thoughtsTokenCount"), "finish_reason": finish_reason,
                     "finish_message": finish_message, "prompt_feedback": data.get("promptFeedback"),
                     "estimated_cost_usd": None, "free_tier_unknown": True,
@@ -282,6 +336,7 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 meta = {
                     "provider": slot.provider, "model": slot.model, "key_slot": slot.key_slot,
                     "prompt_tokens": usage.get("input_tokens"), "completion_tokens": usage.get("output_tokens"),
+                    "cached_tokens": (usage.get("input_tokens_details") or {}).get("cached_tokens"),
                     "estimated_cost_usd": None, "free_tier_unknown": False,
                 }
             elif slot.provider == "anthropic":
@@ -295,6 +350,7 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 meta = {
                     "provider": slot.provider, "model": slot.model, "key_slot": slot.key_slot,
                     "prompt_tokens": usage.get("input_tokens"), "completion_tokens": usage.get("output_tokens"),
+                    "cached_tokens": usage.get("cache_read_input_tokens"),
                     "estimated_cost_usd": None, "free_tier_unknown": False,
                 }
             else:
@@ -306,10 +362,13 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 "provider_failover_used": bool(attempts),
                 "provider_failover_reason": attempts[-1].get("error_class") if attempts else None,
                 "total_latency_ms": round((time.monotonic() - started_all) * 1000),
+                "model_tier": tier, "reservation_id": reservation,
+                "estimated_cost_eur": float(estimate), "actual_cost_eur": None,
             })
             if not text.strip():
                 reason = str(meta.get("finish_reason") or "unknown")
                 raise RuntimeError(f"LLM returned empty text; finish_reason={reason}")
+            cost_control.finalize_ai_usage(reservation, meta, result_status="completed")
             return text, meta
         except Exception as exc:
             last_error = exc
@@ -318,15 +377,22 @@ def text_complete(prompt: str, *, task_type: str = TASK_CHEAP_CLASSIFICATION, ma
                 "provider": slot.provider, "model": slot.model, "key_slot": slot.key_slot, "status": "failed",
                 "error_class": provider_health(err), "failover_eligible": should_failover(err),
             })
+            if reservation:
+                cost_control.finalize_ai_usage(reservation, {
+                    "provider": slot.provider, "model": slot.model, "model_tier": tier,
+                    "llm_latency_ms": round((time.monotonic() - started) * 1000),
+                }, result_status="provider_failed")
             if not should_failover(err):
                 break
     raise RuntimeError(f"BLOCKED_LLM_PROVIDER: all eligible providers failed; last_error={str(last_error)[:1000]}")
 
 
-def router_status(task_type: str = TASK_BROWSER_REASONING) -> dict[str, Any]:
+def router_status(task_type: str = TASK_BROWSER_REASONING, model_tier: str | None = None) -> dict[str, Any]:
+    tier = model_tier or default_tier(task_type)
     return {
         "task_type": task_type,
-        "slots": [slot.public() for slot in configured_slots(task_type)],
-        "default_order": list(TASK_ORDERS.get(task_type, DEFAULT_ORDER)),
-        "google_model_chain": list(_google_model_chain(task_type)),
+        "model_tier": tier,
+        "slots": [slot.public() for slot in configured_slots(task_type, tier)],
+        "default_order": list(_provider_order(tier, task_type)),
+        "google_model_chain": list(_google_model_chain(task_type, tier)),
     }

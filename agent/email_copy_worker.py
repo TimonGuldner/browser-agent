@@ -5,7 +5,7 @@ import os
 import urllib.parse
 import urllib.request
 
-from agent import llm_router
+from agent import intelligence, llm_router
 from agent.compliance_gate import email_gate
 
 BASE_ID = os.getenv("AIRTABLE_SALES_BASE_ID", "appuPKnVyLsbWbxMR")
@@ -37,12 +37,10 @@ def candidates():
 
 def draft(fields):
     context = {k: fields.get(k) for k in ("Company", "Industry", "City", "Website", "Primary Pitch", "Why Now", "Proof 1", "Proof 2", "Proof 3")}
-    prompt = f'''Write a short natural German first-contact B2B email. This is the EMAIL COPY AGENT, not Agent 0. Use only verified supplied facts and never invent personalization. Avoid sales-pitch language, pressure, exaggerated claims and gendering. Do not claim something was noticed unless the supplied evidence proves it. The first message should feel like a normal human note and ask permission to send the useful Google Maps/local visibility observations; do not lead with product features or price. Return JSON only with subject and body, body <= 90 words. Context: {json.dumps(context, ensure_ascii=False)}'''
-    text, _ = llm_router.text_complete(prompt, task_type=llm_router.TASK_PERSONALIZATION, max_output_tokens=400)
-    cleaned = text.strip().strip("`")
-    if cleaned.startswith("json"):
-        cleaned = cleaned[4:].lstrip()
-    result = json.loads(cleaned)
+    result, _ = intelligence.draft_email({
+        **context,
+        "instructions": "Natural German, body <=90 words. Ask permission to send useful observations. No pressure.",
+    })
     return str(result.get("subject") or "").strip(), str(result.get("body") or "").strip()
 
 

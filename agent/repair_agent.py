@@ -4,11 +4,13 @@ import json
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from supabase import Client, create_client
 from agent import llm_router
+from agent.ai_control import AIControl, AIRequest
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -135,8 +137,22 @@ STRICT RULES
 JSON schema:
 {{"action":"patch|diagnose","file_path":"agent/...py or empty","patch":"unified diff or empty","reason":"concise root cause and remedy","confidence":0.0,"test_plan":"concise"}}
 """
-    text, meta = llm_router.text_complete(prompt, task_type=llm_router.TASK_REPAIR_ANALYSIS, max_output_tokens=2600)
-    return parse_json_response(text), meta
+    retry_count = int(input_data.get("supervisor_retry_count") or 0)
+    proposal, meta = AIControl().execute(
+        prompt,
+        AIRequest(
+            task_type="unknown_production_error", purpose="technical_root_cause_and_safe_patch",
+            complexity=0.9, risk="high", expected_value_eur=Decimal("50"),
+            confidence_required=MIN_PATCH_CONFIDENCE, previous_attempts=retry_count,
+            previous_model=input_data.get("previous_repair_model"),
+        ),
+        {
+            "action": ("patch", "diagnose"), "file_path": str, "patch": str,
+            "reason": str, "confidence": (int, float), "test_plan": str,
+        },
+        2600,
+    )
+    return dict(proposal), dict(meta)
 
 
 def run_cmd(args: list[str], *, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:

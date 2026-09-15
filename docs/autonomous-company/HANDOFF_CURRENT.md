@@ -1,13 +1,17 @@
 # HANDOFF CURRENT
-CURRENT RUN: 3, implementation and controlled owned-channel execution complete.
-CURRENT MISSION: Growth execution through the existing Control Plane.
-LAST VERIFIED STEP: All 18 growth tasks completed. Actual Airtable adapter evaluated 46 candidates; no send without route evidence. CI 34925991092 and 34925991078 succeeded.
-CURRENT COMMIT: Control code 6d797c590da88e70676d8f1454a26fc4087a6c48; product 05ce8aac073cf966f3251ff22a16aafb68c29887. Documentation commit follows; use git HEAD.
-CURRENT PRODUCTION STATE: Run 58ca6399-5e5d-46d5-a23e-527f01bb8312 running. Maps guide CTA live. Experiment f7bf4c71-4789-4bba-a5ae-a87a346f9be2 deadline 2026-09-22T03:30:43Z. Authenticated analytics sync deployed. Run has two pageviews and no recorded downstream outcomes.
-TESTS PASSING: 22 Python tests; changed product TypeScript; DB lifecycle/rollback/four experiment decisions; channel allocation; Vercel success; live CTA/destination HTTP200; sync HTTP200; unauthorized HTTP401; analytics canary HTTP204, excluded from export and deleted.
-TESTS FAILING: None in completed acceptance. External posting and outreach delivery untested.
-CURRENT INCIDENT: Legacy paid jobs hit projected-spend guard; do not disable it.
-CURRENT TASK: Observe real experiment outcomes through existing scheduled loop.
-EXACT NEXT STEP: Read HANDOFF_RUN_3.md; verify scheduled heartbeat, latest sync and experiment metrics. Enforce minimum sample/deadline; do not invent a winner.
-DO NOT REDO: No new architecture/queue/scheduler/dashboard. Do not republish CTA, credit historical/test events or bypass contact gates.
-KNOWN ISSUES: Future autonomous product writes need scoped PRODUCT_GITHUB_TOKEN. External routes need evidence; broader SERP discovery/adapters incomplete. Historical identity unknown; sync failure retries delayed by 30-minute cache. Budget remaining EUR25.806294; incremental deterministic growth cost EUR0.
+
+CURRENT RUN: 4 — extreme escalation, self-healing and central AI intelligence.
+LAST VERIFIED STEP: Central intelligence milestone passes 32 local tests. Migration `locenix_ai_intelligence_control` is applied and appears in real migration history. A real `AI_ROUTING_TIER_0` event was persisted for deterministic Run-4 inventory.
+CURRENT COMMIT: Run-3 head `1f0b4c68e22b9e76d31a9c041e1c1a925530f431`; Run-4 AI milestone commit follows this file.
+PRODUCTION STATE: Run `58ca6399-5e5d-46d5-a23e-527f01bb8312` is active. Existing owned SEO CTA remains live. Latest product Git HEAD `05ce8aa` has failed Vercel status; last verified deployed code commit is `cd75d11`. Control queue currently has no queued/running jobs. Browser heartbeat is stale; real incident exists.
+PASSING TESTS: 32 unit tests including no-LLM, cheap-first, standard/strong escalation, output validation, cache, batching, provider abstraction/fallback event path and value guard. Database AI migration and role-only read views pass.
+FAILING TESTS: Recovery/failure-injection acceptance not executed yet. Latest product HEAD deployment failed; root cause logs unavailable through current Vercel connection.
+OPEN INCIDENTS: 100 historical FAILED_JOB, 1 DEAD_WORKER, 1 premature MISSING_DISTRIBUTION. Run 4 will deduplicate, correct time-window logic and exercise recovery safely.
+LLM ROUTER STATUS: Central `AIControl` now sits above the existing Google/OpenAI/Anthropic/Browser Use adapter. Main CEO, repair, intelligence and email-copy text paths are routed centrally; legacy standalone Google Ads experiments remain direct integrations.
+MODEL TIERS CONFIGURED: deterministic; cheap (`gemini-2.5-flash-lite`, configurable fallback); standard (`gemini-3.6-flash` / configured alternatives); strong (`claude-sonnet-4-6`, configured Google fallback). Provider/model order is environment configuration.
+CURRENT AI COST: Overall budget before new paid calls EUR 4.193706 spent / EUR 25.806294 remaining. Run-4 tests used no provider calls and added EUR 0.
+CURRENT TASK: Implement incident schema, deduplication, watchdog windows, bounded recovery, original-task retry and learning.
+EXACT NEXT STEP: Apply and test the additive resilience migration, then execute transaction-safe failure injections and one controlled real owned-page retry.
+FILES RELEVANT: `agent/ai_control.py`, `agent/llm_router.py`, `agent/cost_control.py`, `agent/intelligence.py`, `supabase/migrations/20260915041000_ai_intelligence_control.sql`, `tests/test_ai_control.py`.
+DO NOT REDO: Keep existing agent_jobs queue, scheduler, CEO, cost ledger and provider adapters. Do not count test events or historical metrics as growth outcomes.
+KNOWN ISSUES: Product latest deployment failure, GitHub scheduled-run delay, stale browser worker, legacy direct experimental model calls, incomplete exact provider prices, and untriaged historical incidents.

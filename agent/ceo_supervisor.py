@@ -5,9 +5,11 @@ import os
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from agent import llm_router
+from agent.ai_control import AIControl, AIRequest
 
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
@@ -214,20 +216,27 @@ def update_objectives(metrics: dict[str, int], health: dict) -> int:
 def executive_analysis(metrics: dict[str, int], gaps: dict[str, int], health: dict) -> dict | None:
     if not any(gaps.values()) or not llm_router.configured_slots(llm_router.TASK_EXECUTIVE_ANALYSIS):
         return None
-    prompt = f"""You are Agent 0's executive analysis helper for LOCENIX. The numbers below are immutable technical measurements; never change or invent them. Return JSON only with keys priority_order (array of metric names), diagnosis (short string), next_actions (max 4 concise actions), and blocker_notes (array). Prefer actions that can close today's verified gaps safely. Do not suggest bypassing LinkedIn security/rate limits or sending unapproved email.
+    prompt = f"""You are Agent 0's executive analysis helper for LOCENIX. The numbers below are immutable technical measurements; never change or invent them. Return JSON only with keys priority_order (array of metric names), diagnosis (short string), next_actions (max 4 concise actions), blocker_notes (array), confidence (0-1), reason_summary, recommended_action and requires_escalation. Prefer actions that can close today's verified gaps safely. Do not suggest bypassing LinkedIn security/rate limits or sending unapproved email.
 
 ACTUAL={json.dumps(metrics)}
 GAPS={json.dumps(gaps)}
 HEALTH={json.dumps(health)}
 """
     try:
-        text, meta = llm_router.text_complete(prompt, task_type=llm_router.TASK_EXECUTIVE_ANALYSIS, max_output_tokens=650)
-        cleaned = text.strip().strip('`')
-        if cleaned.startswith('json'):
-            cleaned = cleaned[4:].lstrip()
-        analysis = json.loads(cleaned)
-        if not isinstance(analysis, dict):
-            return None
+        analysis, meta = AIControl().execute(
+            prompt,
+            AIRequest(
+                task_type=llm_router.TASK_EXECUTIVE_ANALYSIS, purpose="daily_gap_prioritization",
+                complexity=0.72, risk="medium", expected_value_eur=Decimal("10"),
+                confidence_required=0.8,
+            ),
+            {
+                "priority_order": list, "diagnosis": str, "next_actions": list,
+                "blocker_notes": list, "confidence": (int, float), "reason_summary": str,
+                "recommended_action": str, "requires_escalation": bool,
+            },
+            650,
+        )
         return {'analysis': analysis, 'llm': meta}
     except Exception as exc:
         return {'analysis': None, 'error': str(exc)[:1000]}
