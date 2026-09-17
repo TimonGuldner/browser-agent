@@ -1,0 +1,27 @@
+name: LOCENIX Reddit Worker CI
+
+on:
+  pull_request:
+    paths:
+      - 'reddit-worker/**'
+      - '.github/workflows/reddit-worker.yml'
+      - '.github/workflows/reddit-worker-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: reddit-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

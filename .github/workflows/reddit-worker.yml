@@ -1,0 +1,56 @@
+name: LOCENIX Reddit Worker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+
+concurrency:
+  group: locenix-reddit-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reddit-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: reddit-worker
+    env:
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+      AIRTABLE_BASE_ID: appEpBPsuKXOFLxQD
+      AIRTABLE_TABLE_NAME: Action Queue
+      MAX_ACTIONS_PER_RUN: '3'
+      EXPECTED_REDDIT_USERNAME: ${{ secrets.EXPECTED_REDDIT_USERNAME }}
+      REDDIT_PUBLISH_ENABLED: ${{ secrets.REDDIT_PUBLISH_ENABLED }}
+      LOGIN_WAIT_SECONDS: '600'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Reddit worker
+        run: npm start
