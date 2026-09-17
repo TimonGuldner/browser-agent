@@ -1,3 +1,4 @@
+# Dedicated lifecycle sender; OIDC access is restricted to this workflow.
 name: LOCENIX Lifecycle Email Worker
 
 on:
