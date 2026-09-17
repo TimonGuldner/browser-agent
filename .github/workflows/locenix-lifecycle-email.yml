@@ -25,7 +25,7 @@ jobs:
     env:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       LOCENIX_BASE_URL: https://www.locenix.com
-      EMAIL_FROM: 'LOCENIX <hello@locenix.com>'
+      EMAIL_FROM: 'Timon von LOCENIX <hello@locenix.com>'
     steps:
       - name: Check mail configuration
         run: |
@@ -58,7 +58,7 @@ jobs:
           printf '%s' "$CLAIM" | jq -c '.events[]' | while IFS= read -r ITEM; do
             EVENT_ID=$(printf '%s' "$ITEM" | jq -r '.id')
             IDEMPOTENCY_KEY=$(printf '%s' "$ITEM" | jq -r '.idempotency_key')
-            SEND_PAYLOAD=$(printf '%s' "$ITEM" | jq -c --arg from "$EMAIL_FROM" '{from:$from,to:[.to],subject:.subject,html:.html,headers:(.headers // {})}')
+            SEND_PAYLOAD=$(printf '%s' "$ITEM" | jq -c --arg from "$EMAIL_FROM" '{from:$from,to:[.to],subject:.subject,html:.html,headers:(.headers // {}),reply_to:"hello@locenix.com"}')
 
             RAW=$(curl --silent --show-error -w $'\n%{http_code}' -X POST "https://api.resend.com/emails" \
               -H "Authorization: Bearer ${RESEND_API_KEY}" \
