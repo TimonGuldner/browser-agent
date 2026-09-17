@@ -1,6 +1,6 @@
 import { loadConfig } from './config.js';
 import { AirtableClient } from './airtable.js';
-import { BrowserbaseClient } from './browserbase.js';
+import { LocalBrowserClient } from './local-browser.js';
 import { getLoggedInUsername, waitForManualLogin } from './reddit-auth.js';
 import { processAction } from './publisher.js';
 import { logger } from './logger.js';
@@ -16,28 +16,36 @@ function randomPauseMs(): number {
 async function main(): Promise<void> {
   const config = loadConfig();
   const airtable = new AirtableClient(config.airtableToken, config.airtableBaseId, config.airtableTableName);
-  const browserbase = new BrowserbaseClient(config.browserbaseApiKey, config.browserbaseContextId, config.browserbaseProjectId);
-  const session = await browserbase.start();
+  const browser = new LocalBrowserClient(config.redditProfileDir, config.redditHeadless);
+  const session = await browser.start();
 
   try {
     let username = await getLoggedInUsername(session.page);
     if (!username) {
       logger.warn('LOGIN_REQUIRED');
-      if (session.liveUrl) logger.warn(`Browserbase Live Session: ${session.liveUrl}`);
-      if (config.githubEventName === 'workflow_dispatch') {
-        logger.info(`Waiting up to ${config.loginWaitSeconds}s for manual Reddit login...`);
-        username = await waitForManualLogin(session.page, config.loginWaitSeconds);
-        if (username) {
-          logger.info(`LOGIN_COMPLETE user=${username}`);
-          return;
-        }
+      if (!config.redditLoginMode || config.redditHeadless) {
+        logger.warn('Start the workflow manually in login mode on the self-hosted Windows runner. No Reddit action was attempted.');
+        return;
       }
+
+      logger.info(`Waiting up to ${config.loginWaitSeconds}s for manual Reddit login in the visible Chromium window...`);
+      username = await waitForManualLogin(session.page, config.loginWaitSeconds);
+      if (username) {
+        logger.info(`LOGIN_COMPLETE user=${username}`);
+        return;
+      }
+
       logger.warn('Login was not completed. No Reddit action was attempted.');
       return;
     }
 
     if (config.expectedRedditUsername && username.toLowerCase() !== config.expectedRedditUsername.toLowerCase()) {
       logger.error('Wrong Reddit account logged in', { expected: config.expectedRedditUsername, actual: username });
+      return;
+    }
+
+    if (config.redditLoginMode) {
+      logger.info(`LOGIN_OK user=${username}. Login-only mode exits without posting.`);
       return;
     }
 
