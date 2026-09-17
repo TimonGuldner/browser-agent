@@ -7,3 +7,4 @@ Wake: 2026-09-15 — run controlled Run-4 same-task recovery and verify live own
 Wake: 2026-09-15 — verify CFO terminal routing, deterministic repair guards, and canonical worker idle heartbeat on the hardened head.
 Wake: 2026-09-15 — verify database-side watchdog cadence, explicit AI budget-block telemetry, and idempotent shared-incident escalation.
 Wake: 2026-09-15 — defer nonessential paid browser work at the CFO preflight without failure or attempt consumption; keep deterministic work active.
+Wake: 2026-09-17 — verify GitHub OIDC lifecycle queue claim, Resend delivery, and Supabase sent/failed callback.
