@@ -5,4 +5,7 @@ dist/
 !.env.example
 coverage/
 artifacts/
+.secrets/
+reddit-storage-state*.json
+REDDIT_STORAGE_STATE_B64*.txt
 *.log
