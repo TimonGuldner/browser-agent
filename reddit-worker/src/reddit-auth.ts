@@ -1,4 +1,4 @@
-import type { Page } from 'playwright-core';
+import type { Page } from 'playwright';
 
 export async function getLoggedInUsername(page: Page): Promise<string | null> {
   await page.goto('https://www.reddit.com/settings/profile', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
