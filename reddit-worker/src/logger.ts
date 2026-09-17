@@ -1,4 +1,4 @@
-const SECRET_KEYS = ['AIRTABLE_TOKEN', 'authorization', 'cookie', 'session'];
+const SECRET_KEYS = ['AIRTABLE_TOKEN', 'REDDIT_STORAGE_STATE_B64', 'authorization', 'cookie', 'session'];
 
 function redact(value: unknown): unknown {
   if (typeof value === 'string') {
@@ -11,7 +11,7 @@ function redact(value: unknown): unknown {
   }
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, /token|secret|cookie|authorization/i.test(k) ? '[REDACTED]' : redact(v)]));
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, /token|secret|cookie|authorization|storage.?state/i.test(k) ? '[REDACTED]' : redact(v)]));
   }
   return value;
 }
