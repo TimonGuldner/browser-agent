@@ -1,4 +1,4 @@
-const SECRET_KEYS = ['AIRTABLE_TOKEN', 'BROWSERBASE_API_KEY', 'authorization', 'cookie', 'session'];
+const SECRET_KEYS = ['AIRTABLE_TOKEN', 'authorization', 'cookie', 'session'];
 
 function redact(value: unknown): unknown {
   if (typeof value === 'string') {
