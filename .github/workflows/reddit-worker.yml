@@ -32,25 +32,44 @@ jobs:
       LOGIN_WAIT_SECONDS: '600'
 
     steps:
+      - name: Check runtime configuration
+        id: runtime_config
+        shell: bash
+        run: |
+          if [[ -z "$BROWSERBASE_API_KEY" || -z "$BROWSERBASE_CONTEXT_ID" || -z "$AIRTABLE_TOKEN" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "CONFIG_REQUIRED: Configure BROWSERBASE_API_KEY, BROWSERBASE_CONTEXT_ID and AIRTABLE_TOKEN. Worker not started."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Runtime configuration present."
+          fi
+
       - name: Checkout
+        if: steps.runtime_config.outputs.ready == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node
+        if: steps.runtime_config.outputs.ready == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install dependencies
+        if: steps.runtime_config.outputs.ready == 'true'
         run: npm install --no-audit --no-fund
 
       - name: Typecheck
+        if: steps.runtime_config.outputs.ready == 'true'
         run: npm run typecheck
 
       - name: Test
+        if: steps.runtime_config.outputs.ready == 'true'
         run: npm test
 
       - name: Build
+        if: steps.runtime_config.outputs.ready == 'true'
         run: npm run build
 
       - name: Run Reddit worker
+        if: steps.runtime_config.outputs.ready == 'true'
         run: npm start
