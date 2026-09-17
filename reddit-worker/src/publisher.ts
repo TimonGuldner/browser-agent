@@ -1,4 +1,4 @@
-import type { Page } from 'playwright-core';
+import type { Page } from 'playwright';
 import type { AirtableRecord, QueueFields, ActionExecutionResult } from './types.js';
 import type { AirtableClient } from './airtable.js';
 import { findExistingOnReddit } from './dedupe.js';
