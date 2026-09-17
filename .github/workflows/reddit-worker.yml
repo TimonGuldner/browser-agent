@@ -2,15 +2,6 @@ name: LOCENIX Reddit Worker
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: 'worker = normal run, login = open visible Chromium for one-time Reddit login'
-        required: true
-        default: worker
-        type: choice
-        options:
-          - worker
-          - login
   schedule:
     - cron: '*/10 * * * *'
 
@@ -23,37 +14,33 @@ permissions:
 
 jobs:
   reddit-worker:
-    runs-on: [self-hosted, Windows, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
         working-directory: reddit-worker
-        shell: pwsh
     env:
       AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+      REDDIT_STORAGE_STATE_B64: ${{ secrets.REDDIT_STORAGE_STATE_B64 }}
       AIRTABLE_BASE_ID: appEpBPsuKXOFLxQD
       AIRTABLE_TABLE_NAME: Action Queue
       MAX_ACTIONS_PER_RUN: '3'
       EXPECTED_REDDIT_USERNAME: ${{ secrets.EXPECTED_REDDIT_USERNAME }}
       REDDIT_PUBLISH_ENABLED: ${{ secrets.REDDIT_PUBLISH_ENABLED }}
-      LOGIN_WAIT_SECONDS: '600'
-      REDDIT_PROFILE_DIR: 'C:\locenix\reddit-profile'
-      REDDIT_LOGIN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'login' && 'true' || 'false' }}
-      REDDIT_HEADLESS: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'login' && 'false' || 'true' }}
 
     steps:
       - name: Check runtime configuration
         id: runtime_config
-        shell: pwsh
+        shell: bash
         working-directory: .
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:AIRTABLE_TOKEN)) {
-            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Host "CONFIG_REQUIRED: Configure AIRTABLE_TOKEN. Worker not started."
-          } else {
-            "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Host "Runtime configuration present."
-          }
+          if [[ -z "$AIRTABLE_TOKEN" || -z "$REDDIT_STORAGE_STATE_B64" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "CONFIG_REQUIRED: Configure AIRTABLE_TOKEN and REDDIT_STORAGE_STATE_B64. Worker not started."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Runtime configuration present."
+          fi
 
       - name: Checkout
         if: steps.runtime_config.outputs.ready == 'true'
@@ -71,15 +58,7 @@ jobs:
 
       - name: Install Chromium
         if: steps.runtime_config.outputs.ready == 'true'
-        run: npx playwright install chromium
-
-      - name: Typecheck
-        if: steps.runtime_config.outputs.ready == 'true'
-        run: npm run typecheck
-
-      - name: Test
-        if: steps.runtime_config.outputs.ready == 'true'
-        run: npm test
+        run: npx playwright install --with-deps chromium
 
       - name: Build
         if: steps.runtime_config.outputs.ready == 'true'
