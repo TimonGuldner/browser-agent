@@ -13,6 +13,12 @@ function randomPauseMs(): number {
   return 20_000 + Math.floor(Math.random() * 25_001);
 }
 
+async function safeHeartbeat(airtable: AirtableClient, status: string, loginStatus?: string): Promise<void> {
+  await airtable.setWorkerHeartbeat(status, loginStatus).catch((error) => {
+    logger.warn('Worker heartbeat update failed', { message: error instanceof Error ? error.message : String(error) });
+  });
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const airtable = new AirtableClient(config.airtableToken, config.airtableBaseId, config.airtableTableName);
@@ -22,18 +28,39 @@ async function main(): Promise<void> {
   try {
     const username = await getLoggedInUsername(session.page);
     if (!username) {
+      await safeHeartbeat(airtable, 'login_required', 'login_required');
       logger.warn('LOGIN_REQUIRED: Reddit session from REDDIT_STORAGE_STATE_B64 is no longer valid. Regenerate it locally and replace the GitHub secret. No Reddit action was attempted.');
       return;
     }
 
     if (config.expectedRedditUsername && username.toLowerCase() !== config.expectedRedditUsername.toLowerCase()) {
+      await safeHeartbeat(airtable, 'wrong_account', `wrong_account:${username}`);
       logger.error('Wrong Reddit account logged in', { expected: config.expectedRedditUsername, actual: username });
       return;
     }
 
+    let publishingPaused: boolean;
+    try {
+      publishingPaused = await airtable.isPublishingPaused();
+    } catch (error) {
+      await safeHeartbeat(airtable, 'control_plane_error', 'ok');
+      logger.error('Could not read reddit_publishing_paused. Failing closed: no Reddit action attempted.', { message: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+
+    if (publishingPaused) {
+      await safeHeartbeat(airtable, 'paused', 'ok');
+      logger.info('Reddit publishing is paused by LOCENIX admin control plane. No Reddit action was attempted.');
+      return;
+    }
+
+    await safeHeartbeat(airtable, 'running', 'ok');
     const candidates = await airtable.listCandidates(config.maxActionsPerRun);
     logger.info(`Airtable candidates: ${candidates.length}`);
-    if (!candidates.length) return;
+    if (!candidates.length) {
+      await safeHeartbeat(airtable, 'idle', 'ok');
+      return;
+    }
 
     let processed = 0;
     let published = 0;
@@ -60,6 +87,7 @@ async function main(): Promise<void> {
       }
     }
 
+    await safeHeartbeat(airtable, blocked > 0 ? 'completed_with_blockers' : 'ok', 'ok');
     logger.info('Run complete', { processed, published, blocked, deduped });
   } finally {
     await session.close();
