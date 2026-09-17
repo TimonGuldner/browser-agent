@@ -1,0 +1,85 @@
+name: LOCENIX Lifecycle Email Worker
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/locenix-lifecycle-email.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: locenix-lifecycle-email
+  cancel-in-progress: false
+
+jobs:
+  send-lifecycle-email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      LOCENIX_BASE_URL: https://www.locenix.com
+      EMAIL_FROM: 'LOCENIX <hello@locenix.com>'
+    steps:
+      - name: Check mail configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${RESEND_API_KEY:-}" ]]; then
+            echo "RESEND_API_KEY is missing"
+            exit 1
+          fi
+
+      - name: Claim and send lifecycle emails
+        run: |
+          set -euo pipefail
+
+          OIDC_RESPONSE=$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=locenix-lifecycle")
+          OIDC_TOKEN=$(printf '%s' "$OIDC_RESPONSE" | jq -r '.value')
+          if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
+            echo "Lifecycle: no GitHub OIDC token"
+            exit 1
+          fi
+
+          CLAIM=$(curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer ${OIDC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${LOCENIX_BASE_URL}/api/lifecycle/github/claim")
+          CLAIMED=$(printf '%s' "$CLAIM" | jq -r '.claimed')
+          echo "Lifecycle: claimed=${CLAIMED}"
+
+          printf '%s' "$CLAIM" | jq -c '.events[]' | while IFS= read -r ITEM; do
+            EVENT_ID=$(printf '%s' "$ITEM" | jq -r '.id')
+            IDEMPOTENCY_KEY=$(printf '%s' "$ITEM" | jq -r '.idempotency_key')
+            SEND_PAYLOAD=$(printf '%s' "$ITEM" | jq -c --arg from "$EMAIL_FROM" '{from:$from,to:[.to],subject:.subject,html:.html,headers:(.headers // {})}')
+
+            RAW=$(curl --silent --show-error -w $'\n%{http_code}' -X POST "https://api.resend.com/emails" \
+              -H "Authorization: Bearer ${RESEND_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "Idempotency-Key: ${IDEMPOTENCY_KEY}" \
+              -d "$SEND_PAYLOAD" || true)
+            HTTP_CODE=$(printf '%s\n' "$RAW" | tail -n 1)
+            BODY=$(printf '%s\n' "$RAW" | sed '$d')
+
+            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] && [[ -n "$(printf '%s' "$BODY" | jq -r '.id // empty' 2>/dev/null)" ]]; then
+              MESSAGE_ID=$(printf '%s' "$BODY" | jq -r '.id')
+              RESULT=$(jq -nc --arg id "$EVENT_ID" --arg message_id "$MESSAGE_ID" '{id:$id,ok:true,provider_message_id:$message_id}')
+              echo "Lifecycle: sent event=${EVENT_ID}"
+            else
+              ERROR_TEXT=$(printf '%s' "$BODY" | jq -r '.message // .error // "Resend send failed"' 2>/dev/null || echo "Resend send failed")
+              RESULT=$(jq -nc --arg id "$EVENT_ID" --arg error "$ERROR_TEXT" '{id:$id,ok:false,error:$error}')
+              echo "Lifecycle: failed event=${EVENT_ID} http=${HTTP_CODE}"
+            fi
+
+            curl --fail-with-body --silent --show-error -X POST \
+              -H "Authorization: Bearer ${OIDC_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$RESULT" \
+              "${LOCENIX_BASE_URL}/api/lifecycle/github/result" >/dev/null
+          done
