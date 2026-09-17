@@ -1,4 +1,4 @@
-import type { Locator, Page } from 'playwright-core';
+import type { Locator, Page } from 'playwright';
 import type { QueueFields } from './types.js';
 import { normalizeRedditText } from './dedupe.js';
 

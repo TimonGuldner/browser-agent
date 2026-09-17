@@ -1,4 +1,4 @@
-import type { Page } from 'playwright-core';
+import type { Page } from 'playwright';
 import type { QueueFields } from './types.js';
 import { findExistingOnReddit } from './dedupe.js';
 

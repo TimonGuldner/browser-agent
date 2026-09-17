@@ -8,11 +8,11 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "install:chromium": "playwright install chromium"
   },
   "dependencies": {
-    "@browserbasehq/sdk": "^2.6.0",
-    "playwright-core": "^1.55.0"
+    "playwright": "^1.55.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
