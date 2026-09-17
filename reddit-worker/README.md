@@ -1,6 +1,6 @@
 # LOCENIX Reddit Posting Worker
 
-A small, non-LLM worker that treats Airtable as the source of truth, uses Playwright + a persistent local Chromium profile, checks for duplicates before every write, publishes only pre-approved `Ready-to-Post Copy`, verifies the result, and writes the permalink/status back to Airtable.
+A small, non-LLM worker that treats Airtable as the source of truth, runs Playwright + Chromium on GitHub-hosted Actions, checks for duplicates before every write, publishes only pre-approved `Ready-to-Post Copy`, verifies the result, and writes the permalink/status back to Airtable.
 
 ## Safety model
 
@@ -17,43 +17,18 @@ For a `Reply`, `Target Permalink` must be present and `Target Reddit ID` must st
 
 ## Architecture
 
-GitHub Actions → self-hosted Windows runner → Playwright → persistent Chromium profile → Reddit → Airtable.
+Airtable → GitHub-hosted Actions → Playwright/Chromium → Reddit → verification → Airtable.
 
-There is no Browserbase account and no LLM in the worker. `Ready-to-Post Copy` is never rewritten.
+No VPS, no self-hosted runner, no Browserbase and no LLM are required. `Ready-to-Post Copy` is never rewritten.
 
-## 1. Self-hosted GitHub runner on Windows
-
-Use a Windows machine/VPS that stays online.
-
-1. In the repository open **Settings → Actions → Runners → New self-hosted runner**.
-2. Choose **Windows / x64**.
-3. Run the GitHub setup commands on the Windows machine.
-4. For the first Reddit login, run the runner interactively under the Windows user that will keep using the Chromium profile.
-5. After login, either keep that runner running interactively or install/run the runner service under the SAME Windows account. Do not switch the worker to another Windows account, because Chromium's stored login state belongs to that profile/user context.
-
-The workflow expects the standard labels:
-
-- `self-hosted`
-- `Windows`
-- `X64`
-
-## 2. Persistent Chromium profile
-
-The workflow stores Reddit's browser state here:
-
-`C:\locenix\reddit-profile`
-
-Playwright launches Chromium with `launchPersistentContext`, so cookies and the Reddit login survive future workflow runs on the same self-hosted machine.
-
-Do not delete this folder unless you deliberately want to reset the Reddit login.
-
-## 3. GitHub Secrets
+## 1. GitHub Secrets
 
 Repository → **Settings → Secrets and variables → Actions**.
 
 Required:
 
 - `AIRTABLE_TOKEN`
+- `REDDIT_STORAGE_STATE_B64`
 
 Recommended:
 
@@ -63,9 +38,33 @@ Safety switch:
 
 - `REDDIT_PUBLISH_ENABLED=false` initially
 
-No Browserbase credentials are required.
+`REDDIT_STORAGE_STATE_B64` is a base64 representation of Playwright storage state. Base64 itself is NOT encryption; the value is protected because it is stored as a GitHub Secret. Never commit or share the generated state files.
 
-## 4. Airtable
+## 2. Create the Reddit login state once on your own computer
+
+From the `reddit-worker` folder on your own Windows/macOS/Linux computer:
+
+```bash
+npm install
+npx playwright install chromium
+npm run login:reddit
+```
+
+A visible Chromium window opens.
+
+1. Log in to Reddit manually.
+2. Return to the terminal and press ENTER only after Reddit is fully logged in.
+3. The helper verifies the logged-in Reddit account.
+4. It writes two ignored local files:
+   - `.secrets/reddit-storage-state.json`
+   - `.secrets/REDDIT_STORAGE_STATE_B64.txt`
+5. Open the TXT file locally and copy its full content into GitHub Secret `REDDIT_STORAGE_STATE_B64`.
+
+The Reddit password is never stored in the repository or GitHub. The storage state contains authenticated browser cookies/session state and must therefore be treated like a password.
+
+If Reddit later logs the account out, run `npm run login:reddit` again and replace the GitHub Secret with the newly generated value.
+
+## 3. Airtable
 
 Base: `appEpBPsuKXOFLxQD`
 
@@ -93,32 +92,40 @@ Expected fields:
 
 The Airtable token needs read/write access to this base.
 
-## 5. One-time Reddit login
+## 4. How each GitHub run works
 
-Keep `REDDIT_PUBLISH_ENABLED=false`.
+The workflow runs on `ubuntu-latest`.
 
-1. Connect to the Windows machine/VPS with its desktop visible.
-2. Make sure the self-hosted GitHub runner is running interactively under the intended Windows account.
-3. In GitHub open **Actions → LOCENIX Reddit Worker → Run workflow**.
-4. Choose `mode = login`.
-5. The workflow starts Chromium visibly on the Windows desktop using `C:\locenix\reddit-profile`.
-6. Log in to Reddit manually.
-7. The worker detects the account, prints `LOGIN_COMPLETE`, saves the browser state by closing the persistent profile normally, and exits WITHOUT posting.
+1. Reads `REDDIT_STORAGE_STATE_B64` from GitHub Secrets.
+2. Decodes it only into a temporary file on the ephemeral runner.
+3. Starts Playwright Chromium headlessly with that storage state.
+4. Confirms which Reddit account is logged in.
+5. If login is missing, logs `LOGIN_REQUIRED` and performs no Reddit action.
+6. Reads approved Airtable actions.
+7. Runs duplicate checks before any submit.
+8. Publishes only when `REDDIT_PUBLISH_ENABLED=true`.
+9. Verifies the published permalink.
+10. Updates Airtable and disables `Bot May Publish` for completed actions.
+11. Deletes the temporary storage-state file when the browser session closes.
 
-Later scheduled runs use the same profile headlessly. If Reddit logs the account out in the future, repeat `mode = login`.
+The GitHub runner itself is disposable; the login survives because the reusable storage state is supplied from the GitHub Secret on every run.
 
-## 6. Safe first test
+## 5. Safe first test
 
-1. Confirm `EXPECTED_REDDIT_USERNAME` is set.
-2. Keep `REDDIT_PUBLISH_ENABLED=false` and run `mode = worker`. It may read/dedupe, but it cannot submit new content.
-3. Pick exactly one Airtable row with a verified target/permalink.
-4. Confirm `Ready-to-Post Copy` is final.
-5. Set that row to `Status = Approved` and `Bot May Publish = true`.
-6. Set `REDDIT_PUBLISH_ENABLED=true`.
-7. Run `mode = worker` once manually.
-8. Confirm Airtable receives `Published At`, `Published URL`, `Existing Reddit URL`, and `Bot May Publish=false`.
+1. Set `AIRTABLE_TOKEN`.
+2. Generate and set `REDDIT_STORAGE_STATE_B64`.
+3. Set `EXPECTED_REDDIT_USERNAME`.
+4. Keep `REDDIT_PUBLISH_ENABLED=false`.
+5. Run **Actions → LOCENIX Reddit Worker → Run workflow** manually once.
+6. Confirm the workflow recognizes the expected Reddit account and exits without publishing new content.
+7. Pick exactly one Airtable row with a verified target/permalink.
+8. Confirm `Ready-to-Post Copy` is final.
+9. Set that row to `Status = Approved` and `Bot May Publish = true`.
+10. Set `REDDIT_PUBLISH_ENABLED=true`.
+11. Run the workflow manually once.
+12. Confirm Airtable receives `Published At`, `Published URL`, `Existing Reddit URL`, and `Bot May Publish=false`.
 
-Only after this test should automatic scheduled publishing remain enabled.
+Only after this test should scheduled publishing remain enabled.
 
 ## Dedupe rules
 
@@ -138,25 +145,22 @@ If the UI submit throws or the network times out, the worker does not retry imme
 
 The worker never attempts to bypass CAPTCHA, security checks, account verification, or unusual-activity challenges. It stops that action and records the blocker for human intervention.
 
-## Local commands
+## Local validation
 
 From `reddit-worker`:
 
-```powershell
+```bash
 npm install
-npx playwright install chromium
 npm run typecheck
 npm test
 npm run build
 ```
 
-For a manual local login test, configure `.env` from `.env.example`, set `REDDIT_LOGIN_MODE=true`, `REDDIT_HEADLESS=false`, and run `npm run dev`.
-
 ## Scheduling
 
 The workflow supports:
 
-- manual `workflow_dispatch` with `mode=worker` or `mode=login`
+- manual `workflow_dispatch`
 - cron every 10 minutes
 - concurrency group `locenix-reddit-worker`, `cancel-in-progress: false`
 
