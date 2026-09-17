@@ -2,6 +2,15 @@ name: LOCENIX Reddit Worker
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'worker = normal run, login = open visible Chromium for one-time Reddit login'
+        required: true
+        default: worker
+        type: choice
+        options:
+          - worker
+          - login
   schedule:
     - cron: '*/10 * * * *'
 
@@ -14,15 +23,13 @@ permissions:
 
 jobs:
   reddit-worker:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     defaults:
       run:
         working-directory: reddit-worker
+        shell: pwsh
     env:
-      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
       AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
       AIRTABLE_BASE_ID: appEpBPsuKXOFLxQD
       AIRTABLE_TABLE_NAME: Action Queue
@@ -30,19 +37,23 @@ jobs:
       EXPECTED_REDDIT_USERNAME: ${{ secrets.EXPECTED_REDDIT_USERNAME }}
       REDDIT_PUBLISH_ENABLED: ${{ secrets.REDDIT_PUBLISH_ENABLED }}
       LOGIN_WAIT_SECONDS: '600'
+      REDDIT_PROFILE_DIR: 'C:\locenix\reddit-profile'
+      REDDIT_LOGIN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'login' && 'true' || 'false' }}
+      REDDIT_HEADLESS: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'login' && 'false' || 'true' }}
 
     steps:
       - name: Check runtime configuration
         id: runtime_config
-        shell: bash
+        shell: pwsh
+        working-directory: .
         run: |
-          if [[ -z "$BROWSERBASE_API_KEY" || -z "$BROWSERBASE_CONTEXT_ID" || -z "$AIRTABLE_TOKEN" ]]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "CONFIG_REQUIRED: Configure BROWSERBASE_API_KEY, BROWSERBASE_CONTEXT_ID and AIRTABLE_TOKEN. Worker not started."
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "Runtime configuration present."
-          fi
+          if ([string]::IsNullOrWhiteSpace($env:AIRTABLE_TOKEN)) {
+            "ready=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "CONFIG_REQUIRED: Configure AIRTABLE_TOKEN. Worker not started."
+          } else {
+            "ready=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Host "Runtime configuration present."
+          }
 
       - name: Checkout
         if: steps.runtime_config.outputs.ready == 'true'
@@ -57,6 +68,10 @@ jobs:
       - name: Install dependencies
         if: steps.runtime_config.outputs.ready == 'true'
         run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        if: steps.runtime_config.outputs.ready == 'true'
+        run: npx playwright install chromium
 
       - name: Typecheck
         if: steps.runtime_config.outputs.ready == 'true'
