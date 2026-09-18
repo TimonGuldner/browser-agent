@@ -22,6 +22,8 @@ export interface Config {
   maxActionsPerRun: number;
   expectedRedditUsername?: string;
   publishEnabled: boolean;
+  loginOnly: boolean;
+  loginWindowMinutes: number;
 }
 
 export function loadConfig(): Config {
@@ -34,6 +36,8 @@ export function loadConfig(): Config {
     airtableTableName: process.env.AIRTABLE_TABLE_NAME?.trim() || 'Action Queue',
     maxActionsPerRun: integer('MAX_ACTIONS_PER_RUN', 3, 1, 3),
     expectedRedditUsername: process.env.EXPECTED_REDDIT_USERNAME?.trim() || undefined,
-    publishEnabled: (process.env.REDDIT_PUBLISH_ENABLED || '').toLowerCase() === 'true'
+    publishEnabled: (process.env.REDDIT_PUBLISH_ENABLED || '').toLowerCase() === 'true',
+    loginOnly: (process.env.REDDIT_LOGIN_ONLY || '').toLowerCase() === 'true',
+    loginWindowMinutes: integer('REDDIT_LOGIN_WINDOW_MINUTES', 5, 1, 10)
   };
 }
