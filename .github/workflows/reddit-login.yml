@@ -1,0 +1,60 @@
+name: LOCENIX Reddit Login
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: locenix-reddit-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reddit-login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: reddit-worker
+    env:
+      AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      AIRTABLE_BASE_ID: appEpBPsuKXOFLxQD
+      AIRTABLE_TABLE_NAME: Action Queue
+      EXPECTED_REDDIT_USERNAME: ${{ secrets.EXPECTED_REDDIT_USERNAME }}
+      REDDIT_LOGIN_ONLY: 'true'
+      REDDIT_LOGIN_WINDOW_MINUTES: '5'
+      REDDIT_PUBLISH_ENABLED: 'false'
+
+    steps:
+      - name: Check runtime configuration
+        id: runtime_config
+        shell: bash
+        working-directory: .
+        run: |
+          if [[ -z "$AIRTABLE_TOKEN" || -z "$BROWSERBASE_API_KEY" || -z "$BROWSERBASE_CONTEXT_ID" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "CONFIG_REQUIRED: Missing required runtime configuration."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Checkout
+        if: steps.runtime_config.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - name: Setup Node
+        if: steps.runtime_config.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        if: steps.runtime_config.outputs.ready == 'true'
+        run: npm install --no-audit --no-fund
+      - name: Build
+        if: steps.runtime_config.outputs.ready == 'true'
+        run: npm run build
+      - name: Open Reddit login session
+        if: steps.runtime_config.outputs.ready == 'true'
+        run: npm start
