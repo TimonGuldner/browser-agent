@@ -28,7 +28,7 @@ jobs:
       AIRTABLE_TABLE_NAME: Action Queue
       MAX_ACTIONS_PER_RUN: '3'
       EXPECTED_REDDIT_USERNAME: ${{ secrets.EXPECTED_REDDIT_USERNAME }}
-      REDDIT_PUBLISH_ENABLED: ${{ secrets.REDDIT_PUBLISH_ENABLED }}
+      REDDIT_PUBLISH_ENABLED: 'false'
 
     steps:
       - name: Check runtime configuration
