@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import { getLoggedInUsername } from './reddit-auth.js';
 
 async function main(): Promise<void> {
