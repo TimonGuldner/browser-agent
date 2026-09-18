@@ -8,14 +8,14 @@ function integer(name: string, fallback: number, min: number, max: number): numb
   const raw = process.env[name];
   if (!raw) return fallback;
   const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}`);
-  }
+  if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be an integer between ${min} and ${max}`);
   return value;
 }
 
 export interface Config {
-  redditStorageStateB64: string;
+  browserbaseApiKey: string;
+  browserbaseProjectId?: string;
+  browserbaseContextId: string;
   airtableToken: string;
   airtableBaseId: string;
   airtableTableName: string;
@@ -26,7 +26,9 @@ export interface Config {
 
 export function loadConfig(): Config {
   return {
-    redditStorageStateB64: required('REDDIT_STORAGE_STATE_B64'),
+    browserbaseApiKey: required('BROWSERBASE_API_KEY'),
+    browserbaseProjectId: process.env.BROWSERBASE_PROJECT_ID?.trim() || undefined,
+    browserbaseContextId: required('BROWSERBASE_CONTEXT_ID'),
     airtableToken: required('AIRTABLE_TOKEN'),
     airtableBaseId: process.env.AIRTABLE_BASE_ID?.trim() || 'appEpBPsuKXOFLxQD',
     airtableTableName: process.env.AIRTABLE_TABLE_NAME?.trim() || 'Action Queue',
