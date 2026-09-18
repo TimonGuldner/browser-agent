@@ -1,3 +1,4 @@
+import { appendFile } from 'node:fs/promises';
 import { loadConfig } from './config.js';
 import { AirtableClient } from './airtable.js';
 import { GitHubBrowserClient } from './github-browser.js';
@@ -7,6 +8,21 @@ import { logger } from './logger.js';
 
 function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function randomPauseMs(): number { return 20_000 + Math.floor(Math.random() * 25_001); }
+
+async function writeLiveViewSummary(sessionId: string, liveViewUrl: string): Promise<void> {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+  await appendFile(summaryPath, [
+    '## Reddit Login – Browserbase Live View',
+    '',
+    `**[LIVE-BROWSER JETZT ÖFFNEN](${liveViewUrl})**`,
+    '',
+    `Session: \`${sessionId}\``,
+    '',
+    'Diese Session dient nur dem Login. Es wird in diesem Modus nichts veröffentlicht.',
+    ''
+  ].join('\n')).catch(() => undefined);
+}
 
 async function safeHeartbeat(airtable: AirtableClient, status: string, loginStatus?: string): Promise<void> {
   await airtable.setWorkerHeartbeat(status, loginStatus).catch((error) => {
@@ -21,16 +37,19 @@ async function main(): Promise<void> {
   const session = await browser.start();
 
   try {
-    logger.info('Browserbase session ready', { sessionId: session.sessionId, liveViewUrl: session.liveViewUrl });
+    await session.page.goto('https://www.reddit.com/login/', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
+    await writeLiveViewSummary(session.sessionId, session.liveViewUrl);
+    logger.info(`LIVE_VIEW_URL=${session.liveViewUrl}`);
+    logger.info('Browserbase session ready', { sessionId: session.sessionId });
+
     const username = await getLoggedInUsername(session.page);
     if (!username) {
       await safeHeartbeat(airtable, 'login_required', 'login_required');
-      logger.warn('LOGIN_REQUIRED: Reddit is not logged in. Open the Browserbase Live View for this session and log in manually. No Reddit action was attempted.', { liveViewUrl: session.liveViewUrl });
-      // Keep login-only session alive for 10 minutes so a human can take over Live View.
-      await session.page.goto('https://www.reddit.com/login/', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
+      logger.warn(`LOGIN_REQUIRED_OPEN_THIS_LINK=${session.liveViewUrl}`);
+      // Keep the session alive while the user completes Reddit login in Browserbase Live View.
       await sleep(10 * 60 * 1000);
       const loggedIn = await getLoggedInUsername(session.page);
-      logger.info(loggedIn ? 'Reddit login captured in persistent Browserbase context.' : 'Reddit login was not completed during the Live View window.');
+      logger.info(loggedIn ? `LOGIN_COMPLETE user=${loggedIn}` : 'LOGIN_TIMEOUT: Reddit login was not completed during the Live View window.');
       return;
     }
 
