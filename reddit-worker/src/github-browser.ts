@@ -1,59 +1,46 @@
-import { randomUUID } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { rm, writeFile } from 'node:fs/promises';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import Browserbase from '@browserbasehq/sdk';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 
 export interface GitHubBrowserSessionHandle {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  sessionId: string;
+  liveViewUrl: string;
   close(): Promise<void>;
 }
 
 export class GitHubBrowserClient {
-  constructor(private readonly storageStateB64: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly contextId: string,
+    private readonly projectId?: string
+  ) {}
 
   async start(): Promise<GitHubBrowserSessionHandle> {
-    const statePath = join(tmpdir(), `locenix-reddit-state-${randomUUID()}.json`);
-    const decoded = Buffer.from(this.storageStateB64, 'base64').toString('utf8');
-
-    try {
-      JSON.parse(decoded);
-    } catch {
-      throw new Error('REDDIT_STORAGE_STATE_B64 is not valid base64-encoded Playwright storage state JSON');
-    }
-
-    await writeFile(statePath, decoded, { encoding: 'utf8', mode: 0o600 });
-
-    const browser = await chromium.launch({
-      headless: true,
-      args: ['--disable-dev-shm-usage']
+    const bb = new Browserbase({ apiKey: this.apiKey });
+    const session = await bb.sessions.create({
+      ...(this.projectId ? { projectId: this.projectId } : {}),
+      browserSettings: {
+        context: { id: this.contextId, persist: true }
+      }
     });
 
-    try {
-      const context = await browser.newContext({
-        storageState: statePath,
-        viewport: { width: 1440, height: 1000 },
-        locale: 'de-DE',
-        timezoneId: 'Europe/Berlin'
-      });
-      const page = await context.newPage();
+    const browser = await chromium.connectOverCDP(session.connectUrl);
+    const context = browser.contexts()[0];
+    if (!context) throw new Error('Browserbase session did not expose a browser context');
+    const page = context.pages()[0] || await context.newPage();
+    const debug = await bb.sessions.debug(session.id);
 
-      return {
-        browser,
-        context,
-        page,
-        close: async () => {
-          await context.close().catch(() => undefined);
-          await browser.close().catch(() => undefined);
-          await rm(statePath, { force: true }).catch(() => undefined);
-        }
-      };
-    } catch (error) {
-      await browser.close().catch(() => undefined);
-      await rm(statePath, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    return {
+      browser,
+      context,
+      page,
+      sessionId: session.id,
+      liveViewUrl: debug.debuggerFullscreenUrl || debug.debuggerUrl,
+      close: async () => {
+        await browser.close().catch(() => undefined);
+      }
+    };
   }
 }
