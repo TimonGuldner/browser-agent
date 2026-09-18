@@ -78,13 +78,17 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (publishingPaused) {
+    if (publishingPaused && config.publishEnabled) {
       await safeHeartbeat(airtable, 'paused', 'ok');
       logger.info('Reddit publishing is paused by LOCENIX admin control plane. No Reddit action was attempted.');
       return;
     }
 
-    await safeHeartbeat(airtable, 'running', 'ok');
+    if (publishingPaused && !config.publishEnabled) {
+      logger.info('DRY_RUN: publishing is paused, but safe target/dedupe validation will continue. Publishing remains disabled.');
+    }
+
+    await safeHeartbeat(airtable, config.publishEnabled ? 'running' : 'dry_run', 'ok');
     const candidates = await airtable.listCandidates(config.maxActionsPerRun);
     logger.info(`Airtable candidates: ${candidates.length}`);
     if (!candidates.length) { await safeHeartbeat(airtable, 'idle', 'ok'); return; }
