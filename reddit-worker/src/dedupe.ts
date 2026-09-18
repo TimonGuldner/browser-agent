@@ -1,4 +1,4 @@
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 import type { ExistingRedditItem, QueueFields, RedditActivityChild } from './types.js';
 
 export function normalizeRedditText(value: string | undefined): string {
