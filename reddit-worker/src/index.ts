@@ -19,7 +19,7 @@ async function writeLiveViewSummary(sessionId: string, liveViewUrl: string): Pro
     '',
     `Session: \`${sessionId}\``,
     '',
-    'Diese Session dient nur dem Login. Es wird in diesem Modus nichts veröffentlicht.',
+    'Login-Modus: Es wird nichts veröffentlicht.',
     ''
   ].join('\n')).catch(() => undefined);
 }
@@ -37,19 +37,30 @@ async function main(): Promise<void> {
   const session = await browser.start();
 
   try {
-    await session.page.goto('https://www.reddit.com/login/', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
-    await writeLiveViewSummary(session.sessionId, session.liveViewUrl);
-    logger.info(`LIVE_VIEW_URL=${session.liveViewUrl}`);
-    logger.info('Browserbase session ready', { sessionId: session.sessionId });
+    if (config.loginOnly) {
+      await session.page.goto('https://www.reddit.com/', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
+      await writeLiveViewSummary(session.sessionId, session.liveViewUrl);
+      logger.info(`LIVE_VIEW_URL=${session.liveViewUrl}`);
+      const initialUser = await getLoggedInUsername(session.page);
+      if (initialUser) {
+        await safeHeartbeat(airtable, 'login_ok', 'ok');
+        logger.info(`LOGIN_COMPLETE user=${initialUser}`);
+        return;
+      }
+      await safeHeartbeat(airtable, 'login_required', 'login_required');
+      logger.warn(`LOGIN_REQUIRED_OPEN_THIS_LINK=${session.liveViewUrl}`);
+      await sleep(config.loginWindowMinutes * 60 * 1000);
+      const loggedIn = await getLoggedInUsername(session.page);
+      await safeHeartbeat(airtable, loggedIn ? 'login_ok' : 'login_required', loggedIn ? 'ok' : 'login_required');
+      logger.info(loggedIn ? `LOGIN_COMPLETE user=${loggedIn}` : 'LOGIN_TIMEOUT');
+      return;
+    }
 
+    await session.page.goto('https://www.reddit.com/', { waitUntil: 'domcontentloaded', timeout: 45_000 }).catch(() => undefined);
     const username = await getLoggedInUsername(session.page);
     if (!username) {
       await safeHeartbeat(airtable, 'login_required', 'login_required');
-      logger.warn(`LOGIN_REQUIRED_OPEN_THIS_LINK=${session.liveViewUrl}`);
-      // Keep the session alive while the user completes Reddit login in Browserbase Live View.
-      await sleep(10 * 60 * 1000);
-      const loggedIn = await getLoggedInUsername(session.page);
-      logger.info(loggedIn ? `LOGIN_COMPLETE user=${loggedIn}` : 'LOGIN_TIMEOUT: Reddit login was not completed during the Live View window.');
+      logger.warn('LOGIN_REQUIRED: persistent Browserbase context is not logged in. Worker exits immediately.');
       return;
     }
 
